@@ -57,18 +57,27 @@ app.get('/api/scrape', async (req, res) => {
     // Launch browser (either connect to remote WebSocket or launch locally)
     let wsUrl = process.env.BROWSER_WS_URL || req.query.wsUrl;
     if (wsUrl && !wsUrl.startsWith('ws://') && !wsUrl.startsWith('wss://')) {
-      wsUrl = `wss://chrome.browserless.io/chromium/playwright?token=${wsUrl}`;
+      wsUrl = `wss://chrome.browserless.io/chromium?token=${wsUrl}`;
     }
     let page;
 
     if (wsUrl) {
       sendLog(`🌐 Connecting to remote browser WebSocket...`, 'info');
-      browser = await chromium.connect({ wsEndpoint: wsUrl });
-      context = await browser.newContext({
-        viewport: { width: 1366, height: 768 },
-        userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36'
-      });
-      page = await context.newPage();
+      if (wsUrl.includes('browserless.io') && !wsUrl.includes('/playwright')) {
+        browser = await chromium.connectOverCDP(wsUrl);
+        context = browser.contexts()[0] || await browser.newContext({
+          viewport: { width: 1366, height: 768 },
+          userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36'
+        });
+        page = context.pages()[0] || await context.newPage();
+      } else {
+        browser = await chromium.connect({ wsEndpoint: wsUrl });
+        context = await browser.newContext({
+          viewport: { width: 1366, height: 768 },
+          userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36'
+        });
+        page = await context.newPage();
+      }
     } else if (process.env.VERCEL) {
       throw new Error("Running on Vercel requires a remote browser. Please set the BROWSER_WS_URL environment variable in your Vercel Project Settings (e.g., from Browserless.io).");
     } else {
