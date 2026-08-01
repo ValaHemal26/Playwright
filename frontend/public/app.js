@@ -2,11 +2,7 @@ document.addEventListener('DOMContentLoaded', () => {
   const form = document.getElementById('config-form');
   const startBtn = document.getElementById('start-btn');
   
-  // Pre-populate backend URL with the Render URL if we are hosted on Vercel
-  const backendUrlInput = document.getElementById('backend-url-input');
-  if (backendUrlInput && window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1') {
-    backendUrlInput.value = 'https://playwright-w337.onrender.com';
-  }
+  // Backend URL is resolved dynamically based on hostname
   const btnText = startBtn.querySelector('.btn-text');
   const consoleOutput = document.getElementById('console-output');
   const runStatusBadge = document.getElementById('run-status-badge');
@@ -81,13 +77,11 @@ document.addEventListener('DOMContentLoaded', () => {
     const minCartValue = formData.get('minCartValue');
     const customCoupons = formData.get('customCoupons');
     const headed = form.querySelector('#headed-toggle').checked;
-    let backendUrl = formData.get('backendUrl') || '';
-    if (!backendUrl) {
-      if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
-        backendUrl = 'http://localhost:3000';
-      } else {
-        backendUrl = 'https://playwright-w337.onrender.com';
-      }
+    let backendUrl = '';
+    if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
+      backendUrl = 'http://localhost:3000';
+    } else {
+      backendUrl = 'https://playwright-w337.onrender.com';
     }
 
     // Reset UI State
