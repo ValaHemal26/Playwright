@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AutoSave — Automated Coupon Validator</title>
+  
+  <!-- Modern Fonts -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500&family=Outfit:wght@400;500;600;700&display=swap" rel="stylesheet">
+  
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div class="glow-container">
+    <div class="glow-orb glow-orb-1"></div>
+    <div class="glow-orb glow-orb-2"></div>
+  </div>
+
+  <div class="app-container">
+    <header class="app-header">
+      <div class="logo-area">
+        <span class="logo-icon">%</span>
+        <h1>AutoSave</h1>
+      </div>
+      <p class="tagline">Automated Coupon Scraper & checkout verification platform</p>
+    </header>
+
+    <main class="dashboard-grid">
+      <!-- Input Panel -->
+      <section class="panel-card config-panel">
+        <div class="panel-header">
+          <h2>Automation Parameters</h2>
+          <p>Configure how coupons are scraped and tested</p>
+        </div>
+
+        <form id="config-form" class="config-form">
+          <div class="input-group">
+            <label for="site-select">Coupon Source Site</label>
+            <div class="select-wrapper">
+              <select id="site-select" name="site">
+                <option value="wethrift">wethrift.com (Tab-Switch Method)</option>
+                <option value="grabon">grabon.in (Fast Attribute Extraction)</option>
+              </select>
+            </div>
+          </div>
+
+          <div class="input-group">
+            <label for="cart-value-input">Minimum Cart Value (₹)</label>
+            <input type="number" id="cart-value-input" name="minCartValue" value="300" min="50" max="1000">
+            <span class="input-hint">Pizzas will be added until subtotal reaches this amount.</span>
+          </div>
+
+          <div class="input-group">
+            <label for="backend-url-input">Backend Server URL <span class="optional-tag">(Optional)</span></label>
+            <input type="text" id="backend-url-input" name="backendUrl" placeholder="E.g. https://your-app.onrender.com (blank for local)">
+            <span class="input-hint">Specify your Render or cloud backend URL if hosting on Vercel.</span>
+          </div>
+
+          <div class="input-group">
+            <label for="custom-coupons">Custom Coupons List <span class="optional-tag">(Optional)</span></label>
+            <textarea id="custom-coupons" name="customCoupons" placeholder="Enter coupon codes separated by commas or new lines. E.g. YUM4271, FREE2504. Leaving this blank will auto-scrape codes."></textarea>
+          </div>
+
+          <div class="input-group inline-toggle">
+            <label for="headed-toggle">Run in Headed Browser</label>
+            <label class="switch">
+              <input type="checkbox" id="headed-toggle" name="headed" checked>
+              <span class="slider"></span>
+            </label>
+          </div>
+
+          <button type="submit" id="start-btn" class="btn btn-primary">
+            <span class="btn-text">Start Validation Run</span>
+            <span class="glow-pulse"></span>
+          </button>
+        </form>
+      </section>
+
+      <!-- Live Terminal Console -->
+      <section class="panel-card console-panel">
+        <div class="panel-header">
+          <h2>Live Process Monitor</h2>
+          <p>Real-time execution logs from Playwright context</p>
+          <div class="console-actions">
+            <span id="run-status-badge" class="badge badge-idle">Idle</span>
+          </div>
+        </div>
+
+        <div class="console-body">
+          <div id="console-output" class="console-output">
+            <div class="console-line system">Ready to launch. Click 'Start Validation Run' above.</div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Verified Coupons Grid -->
+      <section class="panel-card results-panel full-width">
+        <div class="panel-header">
+          <h2>Verification Results</h2>
+          <p>Verified active coupon codes from the checkout run</p>
+        </div>
+
+        <div class="results-table-container">
+          <table class="results-table" id="results-table">
+            <thead>
+              <tr>
+                <th>Coupon Code</th>
+                <th>Status</th>
+                <th>Discount Details</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody id="results-body">
+              <tr class="empty-row">
+                <td colspan="4">No results yet. Run the validator to see verified codes here.</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>
