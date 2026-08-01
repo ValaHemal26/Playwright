@@ -8,9 +8,6 @@ WORKDIR /app
 # Copy package files first
 COPY package*.json ./
 
-# Skip downloading browsers during npm install since they are already pre-installed in the base image
-ENV PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1
-
 # Install dependencies (only production dependencies to keep the image slim)
 RUN npm ci --only=production
 
