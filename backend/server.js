@@ -57,7 +57,7 @@ app.get('/api/scrape', async (req, res) => {
     // Launch browser (either connect to remote WebSocket or launch locally)
     let wsUrl = process.env.BROWSER_WS_URL || req.query.wsUrl;
     if (wsUrl && !wsUrl.startsWith('ws://') && !wsUrl.startsWith('wss://')) {
-      wsUrl = `wss://connect.browserbase.com?apiKey=${wsUrl}`;
+      wsUrl = `wss://chrome.browserless.io?token=${wsUrl}`;
     }
     let page;
 
