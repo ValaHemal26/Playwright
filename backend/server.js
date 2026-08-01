@@ -132,17 +132,9 @@ app.get('/api/scrape', async (req, res) => {
     // Scrape coupons if not custom provided
     if (coupons.length === 0) {
       if (site === 'wethrift') {
-        sendLog('🌐 Navigating to wethrift.com...', 'info');
-        await page.goto("https://www.wethrift.com/", { waitUntil: 'commit' });
-        await delay(1000);
-
-        const searchInput = page.getByPlaceholder('Search for a store').first();
-        await searchInput.waitFor({ state: 'visible', timeout: 5000 });
-        await searchInput.fill('dominos india');
-        await page.getByText("Dominos Pizza India").first().click();
-
-        sendLog('⏳ Waiting for store page to load...', 'info');
-        await page.waitForLoadState('domcontentloaded');
+        sendLog("🌐 Navigating directly to Wethrift Domino's India page...", 'info');
+        await page.goto("https://www.wethrift.com/dominos-pizza-india", { waitUntil: 'commit' });
+        await delay(2000);
         await solveCloudflareIfNeeded(page);
 
         sendLog('👉 Clicking "Show Code" to open the coupon detail tab...', 'info');
@@ -243,6 +235,30 @@ app.get('/api/scrape', async (req, res) => {
     await page.getByText("Ask Later").waitFor({ state: 'visible', timeout: 5000 }).catch(() => null);
     if (await page.getByText("Ask Later").isVisible().catch(() => false)) {
       await page.getByText("Ask Later").click();
+    }
+
+    // Handle location selection if requested
+    const addressInput = page.getByPlaceholder(/Enter your delivery address|Enter delivery address|Enter your area|select location/i).first();
+    try {
+      if (await addressInput.isVisible({ timeout: 5000 }).catch(() => false)) {
+        sendLog('📍 Location prompt detected. Setting default delivery location...', 'info');
+        await addressInput.click();
+        await addressInput.fill('Connaught Place, New Delhi');
+        await page.waitForTimeout(2000);
+        
+        // Try clicking a suggestion or pressing ArrowDown + Enter
+        const suggestion = page.locator('[class*="suggestion"], [class*="Suggestion"], [class*="search-result"]').first();
+        if (await suggestion.isVisible({ timeout: 2000 }).catch(() => false)) {
+          await suggestion.click();
+        } else {
+          await addressInput.press('ArrowDown');
+          await page.waitForTimeout(500);
+          await addressInput.press('Enter');
+        }
+        await page.waitForTimeout(4000);
+      }
+    } catch (err) {
+      sendLog(`Info: Location selection step: ${err.message}`, 'info');
     }
 
     sendLog('🍕 Navigating to Pizza Mania menu...', 'info');
