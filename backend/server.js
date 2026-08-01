@@ -16,8 +16,10 @@ app.use((req, res, next) => {
   next();
 });
 
-// Serve static assets from public folder
-app.use(express.static(path.join(__dirname, 'public')));
+// Serves a simple health check status at root
+app.get('/', (req, res) => {
+  res.json({ status: 'running', service: 'scraper-backend' });
+});
 
 app.get('/api/scrape', async (req, res) => {
   // Setup Server-Sent Events headers
@@ -53,7 +55,10 @@ app.get('/api/scrape', async (req, res) => {
     }
 
     // Launch browser (either connect to remote WebSocket or launch locally)
-    const wsUrl = process.env.BROWSER_WS_URL || req.query.wsUrl;
+    let wsUrl = process.env.BROWSER_WS_URL || req.query.wsUrl;
+    if (wsUrl && !wsUrl.startsWith('ws://') && !wsUrl.startsWith('wss://')) {
+      wsUrl = `wss://connect.browserbase.com?apiKey=${wsUrl}`;
+    }
     let page;
 
     if (wsUrl) {
@@ -346,9 +351,9 @@ app.get('/api/scrape', async (req, res) => {
   }
 });
 
-// Fallback to serve index.html for undefined requests
+// Fallback for undefined requests
 app.use((req, res) => {
-  res.sendFile(path.join(__dirname, 'public', 'index.html'));
+  res.status(404).json({ error: 'Not Found' });
 });
 
 app.listen(PORT, () => {

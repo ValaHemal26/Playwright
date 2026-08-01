@@ -82,8 +82,12 @@ document.addEventListener('DOMContentLoaded', () => {
     const customCoupons = formData.get('customCoupons');
     const headed = form.querySelector('#headed-toggle').checked;
     let backendUrl = formData.get('backendUrl') || '';
-    if (!backendUrl && window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1') {
-      backendUrl = 'https://playwright-w337.onrender.com';
+    if (!backendUrl) {
+      if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
+        backendUrl = 'http://localhost:3000';
+      } else {
+        backendUrl = 'https://playwright-w337.onrender.com';
+      }
     }
 
     // Reset UI State
