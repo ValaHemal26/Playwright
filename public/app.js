@@ -5,7 +5,7 @@ document.addEventListener('DOMContentLoaded', () => {
   // Pre-populate backend URL with the Render URL if we are hosted on Vercel
   const backendUrlInput = document.getElementById('backend-url-input');
   if (backendUrlInput && window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1') {
-    backendUrlInput.value = 'https://playwright-jnru.onrender.com';
+    backendUrlInput.value = 'https://playwright-w337.onrender.com';
   }
   const btnText = startBtn.querySelector('.btn-text');
   const consoleOutput = document.getElementById('console-output');
@@ -83,7 +83,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const headed = form.querySelector('#headed-toggle').checked;
     let backendUrl = formData.get('backendUrl') || '';
     if (!backendUrl && window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1') {
-      backendUrl = 'https://playwright-jnru.onrender.com';
+      backendUrl = 'https://playwright-w337.onrender.com';
     }
 
     // Reset UI State
