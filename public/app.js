@@ -1,6 +1,12 @@
 document.addEventListener('DOMContentLoaded', () => {
   const form = document.getElementById('config-form');
   const startBtn = document.getElementById('start-btn');
+  
+  // Pre-populate backend URL with the Render URL if we are hosted on Vercel
+  const backendUrlInput = document.getElementById('backend-url-input');
+  if (backendUrlInput && window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1') {
+    backendUrlInput.value = 'https://playwright-jnru.onrender.com';
+  }
   const btnText = startBtn.querySelector('.btn-text');
   const consoleOutput = document.getElementById('console-output');
   const runStatusBadge = document.getElementById('run-status-badge');
@@ -75,7 +81,10 @@ document.addEventListener('DOMContentLoaded', () => {
     const minCartValue = formData.get('minCartValue');
     const customCoupons = formData.get('customCoupons');
     const headed = form.querySelector('#headed-toggle').checked;
-    const backendUrl = formData.get('backendUrl') || '';
+    let backendUrl = formData.get('backendUrl') || '';
+    if (!backendUrl && window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1') {
+      backendUrl = 'https://playwright-jnru.onrender.com';
+    }
 
     // Reset UI State
     consoleOutput.innerHTML = '';
