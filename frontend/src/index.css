@@ -269,6 +269,7 @@ textarea {
 
 /* Toggle Switch */
 .inline-toggle {
+  display: flex;
   flex-direction: row;
   justify-content: space-between;
   align-items: center;
