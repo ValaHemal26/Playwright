@@ -99,6 +99,9 @@ app.get('/api/scrape', async (req, res) => {
       page = await context.newPage();
     }
 
+    // Ensure desktop viewport size
+    await page.setViewportSize({ width: 1366, height: 768 }).catch(() => {});
+
     // Extra Runtime Security Bypass
     await page.addInitScript(() => {
       Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
@@ -173,7 +176,7 @@ app.get('/api/scrape', async (req, res) => {
         await page.goto("https://www.grabon.in/", { waitUntil: 'commit' });
         await delay(1000);
 
-        const searchInput = page.getByPlaceholder('Search for brands, categories').first();
+        const searchInput = page.locator('input[placeholder="Search for brands, categories"]:visible').first();
         await searchInput.waitFor({ state: 'visible', timeout: 5000 });
         await searchInput.fill('dominos');
         await searchInput.pressSequentially(" ", { delay: 100 });
