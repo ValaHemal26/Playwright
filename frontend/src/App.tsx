@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { io, Socket } from 'socket.io-client';
 
 interface LogLine {
   text: string;
@@ -18,9 +19,12 @@ function App() {
   const [minCartValue, setMinCartValue] = useState<number>(300);
   const [customCoupons, setCustomCoupons] = useState<string>('');
   const [headed, setHeaded] = useState<boolean>(true);
+  const [customBackendUrl, setCustomBackendUrl] = useState<string>('');
+  const [oracleHost, setOracleHost] = useState<string>('YOUR_ORACLE_IP');
 
   // Execution State
-  const [status, setStatus] = useState<'idle' | 'running' | 'done'>('idle');
+  const [status, setStatus] = useState<'idle' | 'queued' | 'running' | 'done'>('idle');
+  const [executionTime, setExecutionTime] = useState<number>(0);
   const [logs, setLogs] = useState<LogLine[]>([
     {
       text: 'Ready to launch. Click \'Start Validation Run\' above.',
@@ -31,7 +35,7 @@ function App() {
   const [results, setResults] = useState<CouponResult[]>([]);
   const [copiedCoupon, setCopiedCoupon] = useState<string | null>(null);
 
-  const eventSourceRef = useRef<EventSource | null>(null);
+  const socketRef = useRef<Socket | null>(null);
   const consoleBodyRef = useRef<HTMLDivElement | null>(null);
 
   // Auto-scroll console to bottom when new logs arrive
@@ -41,14 +45,110 @@ function App() {
     }
   }, [logs]);
 
-  // Clean up EventSource on unmount
+  // Handle execution timer
   useEffect(() => {
+    let interval: NodeJS.Timeout;
+    if (status === 'running') {
+      interval = setInterval(() => {
+        setExecutionTime(prev => prev + 1);
+      }, 1000);
+    } else if (status === 'idle' || status === 'queued') {
+      setExecutionTime(0);
+    }
+    return () => clearInterval(interval);
+  }, [status]);
+
+  // Establish connection to Render Backend Socket.IO on mount
+  useEffect(() => {
+    connectSocket();
     return () => {
-      if (eventSourceRef.current) {
-        eventSourceRef.current.close();
+      if (socketRef.current) {
+        socketRef.current.disconnect();
       }
     };
-  }, []);
+  }, [customBackendUrl]);
+
+  const connectSocket = () => {
+    if (socketRef.current) {
+      socketRef.current.disconnect();
+    }
+
+    let backendUrl = '';
+    if (customBackendUrl.trim()) {
+      backendUrl = customBackendUrl.trim();
+    } else if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
+      backendUrl = 'http://localhost:5000';
+    } else {
+      backendUrl = 'https://playwright-w337.onrender.com';
+    }
+
+    setLogs(prev => [
+      ...prev,
+      {
+        text: `🔌 Connecting to automation gateway at ${backendUrl}...`,
+        type: 'system',
+        timestamp: new Date().toLocaleTimeString()
+      }
+    ]);
+
+    const socket = io(backendUrl, {
+      transports: ['websocket', 'polling']
+    });
+
+    socketRef.current = socket;
+
+    socket.on('connect', () => {
+      setLogs(prev => [
+        ...prev,
+        {
+          text: '✅ Connected to Render backend signaling gateway.',
+          type: 'system',
+          timestamp: new Date().toLocaleTimeString()
+        }
+      ]);
+    });
+
+    socket.on('log', (logData: LogLine) => {
+      setLogs(prev => [...prev, logData]);
+    });
+
+    socket.on('results', (resultsData: CouponResult[]) => {
+      setResults(resultsData);
+    });
+
+    socket.on('status', (statusData: { type: 'queued' | 'running' | 'done' | 'error' | 'busy' | 'idle'; message: string }) => {
+      if (statusData.type === 'running') {
+        setStatus('running');
+      } else if (statusData.type === 'queued') {
+        setStatus('queued');
+      } else if (statusData.type === 'done' || statusData.type === 'error' || statusData.type === 'busy') {
+        setStatus('done');
+      } else if (statusData.type === 'idle') {
+        setStatus('idle');
+      }
+
+      setLogs(prev => [
+        ...prev,
+        {
+          text: statusData.message,
+          type: 'system',
+          timestamp: new Date().toLocaleTimeString()
+        }
+      ]);
+    });
+
+    socket.on('disconnect', () => {
+      setLogs(prev => [
+        ...prev,
+        {
+          text: '❌ Disconnected from signaling gateway.',
+          type: 'system',
+          timestamp: new Date().toLocaleTimeString()
+        }
+      ]);
+      setStatus('idle');
+    });
+  };
 
   const handleCopy = (coupon: string) => {
     navigator.clipboard.writeText(coupon).then(() => {
@@ -61,81 +161,45 @@ function App() {
     });
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleStartTest = (e: React.FormEvent) => {
     e.preventDefault();
 
-    // Close any previous stream
-    if (eventSourceRef.current) {
-      eventSourceRef.current.close();
-    }
-
-    // Determine Backend URL (changed default local port to 5000)
-    let backendUrl = '';
-    if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
-      backendUrl = 'http://localhost:5000';
-    } else {
-      backendUrl = 'https://playwright-w337.onrender.com';
-    }
-
-    // Reset State
-    setLogs([
-      {
-        text: '⚡ Initiating backend automation runner...',
-        type: 'system',
-        timestamp: new Date().toLocaleTimeString()
-      }
-    ]);
-    setResults([]);
-    setStatus('running');
-
-    // Build query params
-    const queryParams = new URLSearchParams({
-      site,
-      minCartValue: minCartValue.toString(),
-      customCoupons,
-      headed: headed.toString()
-    });
-
-    const baseApiUrl = `${backendUrl}/api/scrape`;
-    const sseUrl = `${baseApiUrl}?${queryParams.toString()}`;
-
-    const es = new EventSource(sseUrl);
-    eventSourceRef.current = es;
-
-    es.onmessage = (event) => {
-      try {
-        const data = JSON.parse(event.data);
-
-        if (data.type === 'results') {
-          setResults(data.data || []);
-        } else {
-          setLogs(prev => [
-            ...prev,
-            {
-              text: data.message,
-              type: data.type || 'info',
-              timestamp: new Date().toLocaleTimeString()
-            }
-          ]);
-        }
-      } catch (err) {
-        console.error('Error parsing event data:', err);
-      }
-    };
-
-    es.onerror = (error) => {
+    if (!socketRef.current || !socketRef.current.connected) {
       setLogs(prev => [
         ...prev,
         {
-          text: '🔌 Execution flow finished or connection closed.',
-          type: 'system',
+          text: '⚠️ Cannot start validation. Reconnecting to gateway first...',
+          type: 'warning',
           timestamp: new Date().toLocaleTimeString()
         }
       ]);
-      setStatus('done');
-      es.close();
-      eventSourceRef.current = null;
-    };
+      connectSocket();
+      return;
+    }
+
+    // Reset results & state
+    setResults([]);
+    setExecutionTime(0);
+
+    // Emit parameters over socket
+    socketRef.current.emit('run-test', {
+      site,
+      minCartValue,
+      customCoupons,
+      headed
+    });
+  };
+
+  const handleStopTest = () => {
+    if (socketRef.current) {
+      socketRef.current.emit('stop-test');
+    }
+  };
+
+  const formatTime = (seconds: number) => {
+    const mins = Math.floor(seconds / 60);
+    const secs = seconds % 60;
+    return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
   };
 
   return (
@@ -151,7 +215,7 @@ function App() {
             <span className="logo-icon">%</span>
             <h1>AutoSave</h1>
           </div>
-          <p className="tagline">Automated Coupon Scraper & checkout verification platform</p>
+          <p className="tagline">Playwright Live Headed Scraper & Checkout verification platform</p>
         </header>
 
         <main className="dashboard-grid">
@@ -159,10 +223,10 @@ function App() {
           <section className="panel-card config-panel">
             <div className="panel-header">
               <h2>Automation Parameters</h2>
-              <p>Configure how coupons are scraped and tested</p>
+              <p>Configure and watch tests execute in real time on the Oracle VM</p>
             </div>
 
-            <form onSubmit={handleSubmit} className="config-form">
+            <form onSubmit={handleStartTest} className="config-form">
               <div className="input-group">
                 <label htmlFor="site-select">Coupon Source Site</label>
                 <div className="select-wrapper">
@@ -201,34 +265,74 @@ function App() {
                   name="customCoupons"
                   value={customCoupons}
                   onChange={(e) => setCustomCoupons(e.target.value)}
-                  placeholder="Enter coupon codes separated by commas or new lines. E.g. YUM4271, FREE2504. Leaving this blank will auto-scrape codes."
+                  placeholder="Enter coupon codes separated by commas or new lines."
                 />
               </div>
 
-              <div className="input-group inline-toggle">
-                <label htmlFor="headed-toggle">Run in Headed Browser</label>
-                <label className="switch">
-                  <input
-                    type="checkbox"
-                    id="headed-toggle"
-                    name="headed"
-                    checked={headed}
-                    onChange={(e) => setHeaded(e.target.checked)}
-                  />
-                  <span className="slider"></span>
+              <div className="input-group">
+                <label htmlFor="oracle-host-input">Oracle VM IP / Hostname</label>
+                <input
+                  type="text"
+                  id="oracle-host-input"
+                  value={oracleHost}
+                  onChange={(e) => setOracleHost(e.target.value)}
+                  placeholder="e.g., 129.146.xx.xx"
+                />
+                <span className="input-hint">Points the live remote view frame to your websockify stream.</span>
+              </div>
+
+              <div className="input-group">
+                <label htmlFor="backend-url-input">
+                  Render Backend Gateway <span className="optional-tag">(Optional)</span>
                 </label>
+                <input
+                  type="text"
+                  id="backend-url-input"
+                  placeholder="https://playwright-w337.onrender.com"
+                  value={customBackendUrl}
+                  onChange={(e) => setCustomBackendUrl(e.target.value)}
+                />
+                <span className="input-hint">Specify custom Socket.IO signalling gateway address.</span>
+              </div>
+
+              <div className="input-group inline-toggle" style={{ display: 'none' }}>
+                {/* Kept headed config hidden or default true since VM requires headed mode to capture stream */}
+                <input type="checkbox" id="headed-toggle" checked={headed} onChange={() => setHeaded(true)} />
+              </div>
+
+              <div className="action-buttons-group" style={{ display: 'flex', gap: '1rem', marginTop: '1.5rem' }}>
+                <button
+                  type="submit"
+                  id="start-btn"
+                  className="btn btn-primary"
+                  style={{ flex: 2 }}
+                  disabled={status === 'running' || status === 'queued'}
+                >
+                  <span className="btn-text">
+                    {status === 'running' ? 'Running...' : status === 'queued' ? 'In Queue...' : 'Start Validation Run'}
+                  </span>
+                  <span className="glow-pulse"></span>
+                </button>
+
+                <button
+                  type="button"
+                  id="stop-btn"
+                  className="btn btn-secondary"
+                  style={{ flex: 1, backgroundColor: 'rgba(239, 68, 68, 0.2)', border: '1px solid rgba(239, 68, 68, 0.4)', color: '#ef4444' }}
+                  onClick={handleStopTest}
+                  disabled={status === 'idle'}
+                >
+                  Stop Run
+                </button>
               </div>
 
               <button
-                type="submit"
-                id="start-btn"
-                className="btn btn-primary"
-                disabled={status === 'running'}
+                type="button"
+                className="btn-reconnect"
+                style={{ marginTop: '1rem', width: '100%', background: 'transparent', border: '1px dashed var(--border-light)', color: 'var(--text-muted)', borderRadius: '8px', padding: '0.5rem', cursor: 'pointer' }}
+                onClick={connectSocket}
               >
-                <span className="btn-text">
-                  {status === 'running' ? 'Running Validation...' : 'Start Validation Run'}
-                </span>
-                <span className="glow-pulse"></span>
+                🔄 Reconnect Signal Gateway
               </button>
             </form>
           </section>
@@ -238,18 +342,23 @@ function App() {
             <div className="panel-header">
               <h2>Live Process Monitor</h2>
               <p>Real-time execution logs from Playwright context</p>
-              <div className="console-actions">
+              <div className="console-actions" style={{ display: 'flex', gap: '0.8rem', alignItems: 'center' }}>
+                <span style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>
+                  ⏱️ {formatTime(executionTime)}
+                </span>
                 <span
                   id="run-status-badge"
                   className={`badge ${
                     status === 'running'
                       ? 'badge-running'
+                      : status === 'queued'
+                      ? 'badge-queued'
                       : status === 'done'
                       ? 'badge-done'
                       : 'badge-idle'
                   }`}
                 >
-                  {status === 'running' ? 'Running' : status === 'done' ? 'Finished' : 'Idle'}
+                  {status === 'running' ? 'Running' : status === 'queued' ? 'Queued' : status === 'done' ? 'Finished' : 'Idle'}
                 </span>
               </div>
             </div>
@@ -264,6 +373,26 @@ function App() {
               </div>
             </div>
           </section>
+
+          {/* Remote Live VNC Stream Viewport */}
+          {status === 'running' && (
+            <section className="panel-card video-panel full-width">
+              <div className="panel-header">
+                <h2>🖥️ Live Browser View (noVNC Stream)</h2>
+                <p>Interactive mirror of the remote headed Playwright execution inside Oracle VM</p>
+              </div>
+              <div className="video-body" style={{ display: 'flex', justifyContent: 'center', marginTop: '1rem', width: '100%' }}>
+                <div style={{ position: 'relative', width: '100%', maxWidth: '960px', paddingBottom: '56.25%', background: '#000', borderRadius: '12px', overflow: 'hidden', border: '1px solid var(--border-light)', boxShadow: '0 8px 32px 0 rgba(0, 0, 0, 0.37)' }}>
+                  <iframe
+                    src={`https://${oracleHost}/live?autoconnect=true&resize=scale`}
+                    title="noVNC Browser Stream"
+                    style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', border: 'none' }}
+                    allowFullScreen
+                  />
+                </div>
+              </div>
+            </section>
+          )}
 
           {/* Verified Coupons Grid */}
           <section className="panel-card results-panel full-width">

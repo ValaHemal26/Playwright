@@ -1,12 +1,29 @@
 const express = require('express');
+const http = require('http');
+const { Server } = require('socket.io');
+const ioClient = require('socket.io-client');
 const { chromium } = require('@playwright/test');
 const path = require('path');
+const fs = require('fs');
 
 const app = express();
 const PORT = process.env.PORT || 5000;
+const server = http.createServer(app);
+const io = new Server(server, {
+  cors: {
+    origin: '*',
+    methods: ['GET', 'POST']
+  }
+});
 
-// Helper for delay
-const delay = (ms) => new Promise(resolve => setTimeout(resolve, ms));
+// Ensure public/videos directory exists
+const videosDir = path.join(__dirname, 'public', 'videos');
+if (!fs.existsSync(videosDir)) {
+  fs.mkdirSync(videosDir, { recursive: true });
+}
+
+// Serve public/videos folder statically
+app.use('/videos', express.static(videosDir));
 
 // Enable CORS for cross-origin frontend requests
 app.use((req, res, next) => {
@@ -18,11 +35,209 @@ app.use((req, res, next) => {
 
 // Serves a simple health check status at root
 app.get('/', (req, res) => {
-  res.json({ status: 'running', service: 'scraper-backend' });
+  res.json({ status: 'running', service: 'scraper-backend', mode: 'socket-io-enabled' });
 });
 
+// Helper for delay
+const delay = (ms) => new Promise(resolve => setTimeout(resolve, ms));
+
+// ==========================================
+// ORACLE VM PROXIED QUEUE SYSTEM
+// ==========================================
+const queue = [];
+let currentJob = null;
+
+const ORACLE_VM_URL = process.env.ORACLE_VM_URL || 'http://localhost:4000';
+const ORACLE_AUTH_TOKEN = process.env.ORACLE_AUTH_TOKEN || 'default_secure_token_change_me';
+
+const updateQueuePositions = () => {
+  queue.forEach((job, index) => {
+    const s = io.sockets.sockets.get(job.socketId);
+    if (s) {
+      s.emit('status', { 
+        type: 'queued', 
+        message: `⏳ Request queued. Position: ${index + 1}/${queue.length}` 
+      });
+    }
+  });
+};
+
+const runJobOnOracle = (job, clientSocket) => {
+  console.log(`🔗 Connecting to Oracle VM worker at: ${ORACLE_VM_URL}`);
+  
+  const oracleSocket = ioClient(ORACLE_VM_URL, {
+    auth: {
+      token: ORACLE_AUTH_TOKEN
+    },
+    reconnection: false,
+    timeout: 10000
+  });
+
+  let completed = false;
+
+  oracleSocket.on('connect', () => {
+    console.log('✅ Connected to Oracle VM worker socket');
+    clientSocket.emit('status', { type: 'running', message: '🚀 Connected to Oracle VM. Starting test run...' });
+    
+    // Send run-test to Oracle VM
+    oracleSocket.emit('run-test', job.data);
+  });
+
+  oracleSocket.on('log', (logData) => {
+    clientSocket.emit('log', logData);
+  });
+
+  oracleSocket.on('results', (resultsData) => {
+    clientSocket.emit('results', resultsData);
+  });
+
+  oracleSocket.on('status', (statusData) => {
+    clientSocket.emit('status', statusData);
+    if (statusData.type === 'done' || statusData.type === 'error') {
+      completed = true;
+      oracleSocket.disconnect();
+    }
+  });
+
+  oracleSocket.on('connect_error', (err) => {
+    console.error('❌ Oracle VM Connection error:', err.message);
+    oracleSocket.disconnect();
+    handleOracleFailure(err);
+  });
+
+  oracleSocket.on('disconnect', () => {
+    console.log('🔌 Disconnected from Oracle VM');
+    if (!completed) {
+      handleOracleFailure(new Error('Oracle VM disconnected unexpectedly.'));
+    } else {
+      finishJob();
+    }
+  });
+
+  // Keep track of the active connection on the user's socket
+  clientSocket.activeOracleSocket = oracleSocket;
+
+  function handleOracleFailure(err) {
+    if (job.retries < 3) {
+      job.retries++;
+      const delayMs = job.retries * 3000;
+      clientSocket.emit('status', { 
+        type: 'running', 
+        message: `⚠️ Oracle VM unavailable (${err.message}). Retrying in ${delayMs / 1000}s... (Attempt ${job.retries}/3)` 
+      });
+      setTimeout(() => {
+        // Only retry if the client socket is still active
+        if (io.sockets.sockets.has(job.socketId)) {
+          runJobOnOracle(job, clientSocket);
+        } else {
+          finishJob();
+        }
+      }, delayMs);
+    } else {
+      clientSocket.emit('status', { 
+        type: 'error', 
+        message: `❌ Failed to connect to Oracle VM after 3 attempts: ${err.message}` 
+      });
+      finishJob();
+    }
+  }
+
+  function finishJob() {
+    clientSocket.activeOracleSocket = null;
+    currentJob = null;
+    processQueue();
+  }
+};
+
+const processQueue = () => {
+  if (currentJob || queue.length === 0) return;
+
+  currentJob = queue.shift();
+  const clientSocket = io.sockets.sockets.get(currentJob.socketId);
+
+  if (!clientSocket) {
+    console.log(`Client socket ${currentJob.socketId} disconnected. Skipping job.`);
+    currentJob = null;
+    processQueue();
+    return;
+  }
+
+  clientSocket.emit('status', { type: 'running', message: '⏳ Handshaking with Oracle Cloud VM...' });
+  runJobOnOracle(currentJob, clientSocket);
+  updateQueuePositions();
+};
+
+io.on('connection', (socket) => {
+  console.log(`🔌 Client connected: ${socket.id}`);
+
+  socket.on('run-test', (data) => {
+    // Prevent duplicate entries from same socket
+    const alreadyExists = queue.some(j => j.socketId === socket.id) || (currentJob && currentJob.socketId === socket.id);
+    if (alreadyExists) {
+      socket.emit('status', { type: 'running', message: '⚠️ A test request from you is already active or in the queue.' });
+      return;
+    }
+
+    queue.push({
+      id: Math.random().toString(36).substr(2, 9),
+      socketId: socket.id,
+      data: data,
+      retries: 0
+    });
+
+    socket.emit('status', { 
+      type: 'queued', 
+      message: `⏳ Request queued. Position: ${queue.length}` 
+    });
+
+    updateQueuePositions();
+    processQueue();
+  });
+
+  socket.on('stop-test', () => {
+    console.log(`🛑 Client requested stop: ${socket.id}`);
+    
+    if (currentJob && currentJob.socketId === socket.id) {
+      if (socket.activeOracleSocket) {
+        socket.activeOracleSocket.emit('stop-test');
+        socket.activeOracleSocket.disconnect();
+      }
+      currentJob = null;
+      socket.emit('status', { type: 'idle', message: '🛑 Test run stopped by user.' });
+      processQueue();
+    } else {
+      const index = queue.findIndex(j => j.socketId === socket.id);
+      if (index !== -1) {
+        queue.splice(index, 1);
+        socket.emit('status', { type: 'idle', message: '🛑 Test request removed from queue.' });
+      }
+    }
+    updateQueuePositions();
+  });
+
+  socket.on('disconnect', () => {
+    console.log(`🔌 Client disconnected: ${socket.id}`);
+    
+    if (currentJob && currentJob.socketId === socket.id) {
+      if (socket.activeOracleSocket) {
+        socket.activeOracleSocket.disconnect();
+      }
+      currentJob = null;
+      processQueue();
+    } else {
+      const index = queue.findIndex(j => j.socketId === socket.id);
+      if (index !== -1) {
+        queue.splice(index, 1);
+      }
+    }
+    updateQueuePositions();
+  });
+});
+
+// ==========================================
+// FALLBACK/LOCAL SCRAPE ENDPOINT (SSE)
+// ==========================================
 app.get('/api/scrape', async (req, res) => {
-  // Setup Server-Sent Events headers
   res.setHeader('Content-Type', 'text/event-stream');
   res.setHeader('Cache-Control', 'no-cache');
   res.setHeader('Connection', 'keep-alive');
@@ -44,17 +259,14 @@ app.get('/api/scrape', async (req, res) => {
   try {
     let coupons = [];
 
-    // Parse custom coupons if provided
     if (customCouponsInput.trim()) {
       coupons = customCouponsInput
         .split(/[\n,]/)
         .map(c => c.trim().toUpperCase())
         .filter(c => c.length > 0);
-      
-      sendLog(`📝 Using ${coupons.length} custom user-provided coupons. Skipping scraper step.`, 'info');
+      sendLog(`📝 Using ${coupons.length} custom coupons. Skipping scraper.`, 'info');
     }
 
-    // Launch browser (either connect to remote WebSocket or launch locally)
     let wsUrl = process.env.BROWSER_WS_URL || req.query.wsUrl;
     if (wsUrl && !wsUrl.startsWith('ws://') && !wsUrl.startsWith('wss://')) {
       wsUrl = `wss://chrome.browserless.io/chromium?token=${wsUrl}&stealth=true&blockAds=true`;
@@ -67,25 +279,33 @@ app.get('/api/scrape', async (req, res) => {
         browser = await chromium.connectOverCDP(wsUrl);
         context = browser.contexts()[0] || await browser.newContext({
           viewport: { width: 1366, height: 768 },
-          userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36'
+          userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+          recordVideo: { dir: videosDir, size: { width: 1280, height: 720 } }
         });
         page = context.pages()[0] || await context.newPage();
       } else {
         browser = await chromium.connect({ wsEndpoint: wsUrl });
         context = await browser.newContext({
           viewport: { width: 1366, height: 768 },
-          userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36'
+          userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+          recordVideo: { dir: videosDir, size: { width: 1280, height: 720 } }
         });
         page = await context.newPage();
       }
     } else if (process.env.VERCEL) {
-      throw new Error("Running on Vercel requires a remote browser. Please set the BROWSER_WS_URL environment variable in your Vercel Project Settings (e.g., from Browserless.io).");
+      throw new Error("Running on Vercel requires a remote browser. Please set the BROWSER_WS_URL environment variable.");
     } else {
-      sendLog('🚀 Launching local persistent context...', 'info');
+      const isCloud = process.env.RENDER === 'true' || process.env.NODE_ENV === 'production';
+      const actualHeadless = isCloud ? true : !headed;
+      if (isCloud && headed) {
+        sendLog('⚠️ Cloud container: forcing headless mode.', 'warning');
+      }
+      sendLog(isCloud ? '🚀 Launching headless cloud persistent context...' : '🚀 Launching local persistent context...', 'info');
       context = await chromium.launchPersistentContext('', {
-        headless: !headed,
+        headless: actualHeadless,
         viewport: { width: 1366, height: 768 },
         userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+        recordVideo: { dir: videosDir, size: { width: 1280, height: 720 } },
         args: [
           '--disable-blink-features=AutomationControlled',
           '--no-sandbox',
@@ -99,65 +319,48 @@ app.get('/api/scrape', async (req, res) => {
       page = await context.newPage();
     }
 
-    // Ensure desktop viewport size
     await page.setViewportSize({ width: 1366, height: 768 }).catch(() => {});
-
-    // Extra Runtime Security Bypass
     await page.addInitScript(() => {
       Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
     });
 
-    // Cloudflare Solver Helper
     const solveCloudflareIfNeeded = async (targetPage) => {
       const cloudflareIframe = targetPage.locator('iframe[src*="challenges.cloudflare.com"]').first();
       try {
         if (await cloudflareIframe.isVisible({ timeout: 4000 }).catch(() => false)) {
-          sendLog('⚠️ Cloudflare Turnstile challenge detected! Solving...', 'warning');
+          sendLog('⚠️ Cloudflare detected! Solving...', 'warning');
           await delay(4000);
           const iframeBox = await cloudflareIframe.boundingBox();
           if (iframeBox) {
-            const targetX = iframeBox.x + 35;
-            const targetY = iframeBox.y + (iframeBox.height / 2);
-            await targetPage.mouse.move(targetX, targetY, { steps: 15 });
+            await targetPage.mouse.move(iframeBox.x + 35, iframeBox.y + (iframeBox.height / 2), { steps: 15 });
             await delay(200);
             await targetPage.mouse.down();
             await delay(120);
             await targetPage.mouse.up();
-            sendLog('✅ Clicked Turnstile frame container.', 'success');
+            sendLog('✅ Clicked Turnstile.', 'success');
             await delay(4000);
           }
         }
       } catch (e) {
-        sendLog(`Bypassed Cloudflare or timed out: ${e.message}`, 'info');
+        sendLog(`Bypassed Cloudflare: ${e.message}`, 'info');
       }
     };
 
-    // Scrape coupons if not custom provided
     if (coupons.length === 0) {
       if (site === 'wethrift') {
-        sendLog("🌐 Navigating directly to Wethrift Domino's India page...", 'info');
+        sendLog("🌐 Navigating to Wethrift...", 'info');
         await page.goto("https://www.wethrift.com/dominos-pizza-india", { waitUntil: 'commit' });
         await delay(2000);
         await solveCloudflareIfNeeded(page);
-
-        sendLog('👉 Clicking "Show Code" to open the coupon detail tab...', 'info');
-
-        // Listen for new tab/page
         const [newPage] = await Promise.all([
           context.waitForEvent('page'),
           page.getByRole('button', { name: 'Show Code' }).first().click()
         ]);
-
-        sendLog('📂 New tab opened. Preparing to extract codes...', 'info');
         await newPage.waitForLoadState('domcontentloaded');
         await solveCloudflareIfNeeded(newPage);
-
-        // Scroll to trigger lazy rendering of table
         await newPage.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
         await delay(2000);
-
         await newPage.locator('button:has-text("Copy")').first().waitFor({ state: 'attached', timeout: 5000 }).catch(() => null);
-
         coupons = await newPage.evaluate(() => {
           const copyButtons = Array.from(document.querySelectorAll('button')).filter(btn => btn.textContent?.trim() === 'Copy');
           return copyButtons.map(btn => {
@@ -167,33 +370,21 @@ app.get('/api/scrape', async (req, res) => {
             return textContainer ? textContainer.textContent?.trim() || '' : '';
           }).filter(code => code.length > 0 && code !== 'Copy');
         });
-
-        sendLog(`🎉 Scraped ${coupons.length} unique coupons from wethrift.com`, 'success', coupons);
-        await newPage.close().catch(() => { });
+        sendLog(`🎉 Scraped ${coupons.length} coupons from wethrift.com`, 'success', coupons);
+        await newPage.close().catch(() => {});
       } else {
-        // grabon.in Scraping
         sendLog('🌐 Navigating to grabon.in...', 'info');
         await page.goto("https://www.grabon.in/", { waitUntil: 'commit' });
         await delay(1000);
-
         const searchInput = page.locator('input[placeholder="Search for brands, categories"]:visible').first();
         await searchInput.waitFor({ state: 'visible', timeout: 5000 });
         await searchInput.fill('dominos');
         await searchInput.pressSequentially(" ", { delay: 100 });
-
-        sendLog('🔍 Loading search suggestions...', 'info');
         await page.locator('p, span, a').filter({ hasText: /^dominos$/i }).first().click();
-
         await page.waitForLoadState('domcontentloaded');
         await solveCloudflareIfNeeded(page);
-
-        sendLog('⏳ Waiting for store page to load...', 'info');
         const cards = page.locator('.gcbr, [id^="cpn_"]');
         await cards.first().waitFor({ state: 'visible', timeout: 10000 }).catch(() => null);
-        const cardCount = await cards.count();
-
-        sendLog(`📂 Extracting coupon codes from ${cardCount} coupon cards...`, 'info');
-
         coupons = await page.evaluate(() => {
           const cardsList = Array.from(document.querySelectorAll('.gcbr, [id^="cpn_"]'));
           const list = [];
@@ -209,47 +400,38 @@ app.get('/api/scrape', async (req, res) => {
           });
           return list;
         });
-
-        sendLog(`🎉 Scraped ${coupons.length} unique coupons from grabon.in`, 'success', coupons);
+        sendLog(`🎉 Scraped ${coupons.length} coupons from grabon.in`, 'success', coupons);
       }
     }
 
     if (coupons.length === 0) {
-      sendLog('❌ No coupons found to verify. Aborting.', 'error');
+      sendLog('❌ No coupons found. Aborting.', 'error');
       res.end();
-      await context.close().catch(() => { });
+      await context.close().catch(() => {});
       browserClosed = true;
       return;
     }
 
-    // Now switch to Domino's validation
-    sendLog("🍕 Opening Domino's Pizza India...", 'info');
+    sendLog("🍕 Opening Domino's...", 'info');
     await page.bringToFront();
     await page.goto("https://www.dominos.co.in/", { waitUntil: 'domcontentloaded' }).catch(() => null);
-
-    sendLog('🛒 Navigating to Online Ordering system...', 'info');
     await page.getByText("ORDER ONLINE NOW").click();
-
     await page.getByText("skip").waitFor({ state: 'visible', timeout: 8000 }).catch(() => null);
     if (await page.getByText("skip").isVisible().catch(() => false)) {
       await page.getByText("skip").click();
     }
-
     await page.getByText("Ask Later").waitFor({ state: 'visible', timeout: 5000 }).catch(() => null);
     if (await page.getByText("Ask Later").isVisible().catch(() => false)) {
       await page.getByText("Ask Later").click();
     }
 
-    // Handle location selection if requested
-    const addressInput = page.getByPlaceholder(/Enter your delivery address|Enter delivery address|Enter your area|select location/i).first();
+    const addressInput = page.getByPlaceholder(/Enter your delivery address|Enter delivery address/i).first();
     try {
       if (await addressInput.isVisible({ timeout: 5000 }).catch(() => false)) {
-        sendLog('📍 Location prompt detected. Setting default delivery location...', 'info');
+        sendLog('📍 Setting location...', 'info');
         await addressInput.click();
         await addressInput.fill('Connaught Place, New Delhi');
         await page.waitForTimeout(2000);
-        
-        // Try clicking a suggestion or pressing ArrowDown + Enter
         const suggestion = page.locator('[class*="suggestion"], [class*="Suggestion"], [class*="search-result"]').first();
         if (await suggestion.isVisible({ timeout: 2000 }).catch(() => false)) {
           await suggestion.click();
@@ -260,130 +442,80 @@ app.get('/api/scrape', async (req, res) => {
         }
         await page.waitForTimeout(4000);
       }
-    } catch (err) {
-      sendLog(`Info: Location selection step: ${err.message}`, 'info');
-    }
+    } catch (err) {}
 
-    sendLog('🍕 Navigating to Pizza Mania menu...', 'info');
     await page.getByText("Pizza Mania").click();
     await page.waitForTimeout(3000);
 
-    // Add pizzas to hit the minimum cart value
-    sendLog(`🛒 Adding items to meet minimum cart value of ₹${minCartValue}...`, 'info');
-    const pizzasToAdd = ['Classic', 'Onion', 'Paneer & Capsicum with Videshi Hot Sauce', 'Golden Corn', 'Classic Hand Tossed', 'Cheese N Corn'];
+    const pizzasToAdd = ['Classic', 'Onion', 'Golden Corn', 'Classic Hand Tossed'];
     let currentSubtotal = 0;
 
     for (const pizza of pizzasToAdd) {
-      if (currentSubtotal >= minCartValue) {
-        sendLog(`✅ Cart subtotal of ₹${currentSubtotal} meets/exceeds requirement. Proceeding to checkout.`, 'success');
-        break;
-      }
-
+      if (currentSubtotal >= minCartValue) break;
       const targetCard = page.locator('.card-content').filter({
         has: page.locator('.pizza-title').getByText(pizza, { exact: true })
       });
-
       if (await targetCard.isVisible().catch(() => false)) {
-        sendLog(`Adding ${pizza}...`, 'info');
         await targetCard.getByRole('button', { name: 'Add +' }).first().click();
         await page.waitForTimeout(1000);
-
-        // Read subtotal
-        const viewCartText = await page.locator('div:has-text("View Cart"), button:has-text("View Cart")').first().innerText().catch(() => '');
+        const viewCartText = await page.locator('div:has-text("View Cart")').first().innerText().catch(() => '');
         const match = viewCartText.match(/₹\s*(\d+)/);
-        if (match) {
-          currentSubtotal = parseInt(match[1]);
-          sendLog(`Current subtotal: ₹${currentSubtotal}`, 'info');
-        } else {
-          currentSubtotal += 100; // estimated fallback increment
-        }
+        currentSubtotal = match ? parseInt(match[1]) : currentSubtotal + 100;
       }
     }
 
-    sendLog('🛒 Going to Cart...', 'info');
     await page.getByText("View Cart").click();
-
-    sendLog('⏳ Waiting for Cart screen...', 'info');
     await page.locator('div:has-text("Cart")').first().waitFor({ state: 'visible', timeout: 10000 });
-
-    sendLog('🎟️ Opening offers modal...', 'info');
     await page.getByText("View All Offers").click();
     await page.getByPlaceholder("Type Offer code here…").waitFor({ state: 'visible', timeout: 5000 });
 
-    // Validate coupons loop
     const results = [];
     for (const coupon of coupons) {
-      sendLog(`Applying Coupon: ${coupon}...`, 'info');
       try {
         const input = page.getByPlaceholder("Type Offer code here…");
         await input.fill(coupon);
         await page.getByRole("button", { name: "Apply" }).first().click();
-
         await page.waitForTimeout(2000);
-
-        // Check for error element
-        const errorMsg = page.locator('[class*="OffersErrorMsg"], p:has-text("invalid"), p:has-text("expired"), span:has-text("invalid"), span:has-text("expired"), div:has-text("invalid"), div:has-text("expired")').first();
+        const errorMsg = page.locator('[class*="OffersErrorMsg"], p:has-text("invalid"), p:has-text("expired")').first();
         const errorVisible = await errorMsg.isVisible().catch(() => false);
-
         if (errorVisible) {
-          const errorText = await errorMsg.innerText().catch(() => 'Coupon invalid/expired');
-          sendLog(`Coupon ${coupon} FAILED: ${errorText}`, 'error');
-          results.push({ coupon, status: 'FAILED', details: errorText });
+          const text = await errorMsg.innerText().catch(() => 'Invalid');
+          results.push({ coupon, status: 'FAILED', details: text });
           await input.fill('');
         } else {
-          let discountText = "Coupon Applied Successfully";
-          const discountAppliedRow = page.locator('div:has-text("Discount Applied")').first();
-          if (await discountAppliedRow.isVisible().catch(() => false)) {
-            const rawDiscount = await discountAppliedRow.innerText().catch(() => '');
-            discountText = rawDiscount.trim().replace(/\n/g, ' ');
-          }
-
-          sendLog(`Coupon ${coupon} SUCCESS: ${discountText}`, 'success');
-          results.push({ coupon, status: 'SUCCESS', details: discountText });
-
-          // Reset the coupon state for next attempt
-          const viewOtherBtn = page.getByRole("link", { name: "View other offers" });
-          if (await viewOtherBtn.isVisible().catch(() => false)) {
-            await viewOtherBtn.click();
-          } else {
-            const removeBtn = page.locator('span:has-text("Remove"), button:has-text("Remove")');
-            if (await removeBtn.isVisible().catch(() => false)) {
-              await removeBtn.click();
-              await page.waitForTimeout(1000);
-              await page.getByText("View All Offers").click().catch(() => null);
-            }
+          results.push({ coupon, status: 'SUCCESS', details: 'Applied successfully' });
+          const removeBtn = page.locator('span:has-text("Remove"), button:has-text("Remove")');
+          if (await removeBtn.isVisible().catch(() => false)) {
+            await removeBtn.click();
+            await page.waitForTimeout(1000);
+            await page.getByText("View All Offers").click().catch(() => null);
           }
         }
       } catch (e) {
-        sendLog(`Error applying coupon ${coupon}: ${e.message}`, 'error');
         results.push({ coupon, status: 'FAILED', details: e.message });
-        await page.getByPlaceholder("Type Offer code here…").fill('').catch(() => null);
       }
-
-      // Stream the full updated results array to the client
       res.write(`data: ${JSON.stringify({ type: 'results', data: results })}\n\n`);
     }
 
     sendLog('🏁 Coupon verification run completed!', 'success');
+    if (context) {
+      await context.close().catch(() => {});
+      browserClosed = true;
+    }
     res.end();
   } catch (err) {
     sendLog(`❌ Execution error: ${err.message}`, 'error');
+    if (context && !browserClosed) {
+      await context.close().catch(() => {});
+      browserClosed = true;
+    }
     res.end();
   } finally {
-    if (context) {
-      await context.close().catch(() => {});
-    }
-    if (browser) {
-      await browser.close().catch(() => {});
-    }
+    if (context && !browserClosed) await context.close().catch(() => {});
+    if (browser) await browser.close().catch(() => {});
   }
 });
 
-// Fallback for undefined requests
-app.use((req, res) => {
-  res.status(404).json({ error: 'Not Found' });
-});
-
-app.listen(PORT, () => {
+server.listen(PORT, () => {
   console.log(`Server running at http://localhost:${PORT}`);
 });
