@@ -358,7 +358,7 @@ function App() {
               <div className="video-body" style={{ display: 'flex', justifyContent: 'center', marginTop: '1rem', width: '100%' }}>
                 <div style={{ position: 'relative', width: '100%', maxWidth: '960px', paddingBottom: '56.25%', background: '#000', borderRadius: '12px', overflow: 'hidden', border: '1px solid var(--border-light)', boxShadow: '0 8px 32px 0 rgba(0, 0, 0, 0.37)' }}>
                   <iframe
-                    src={`https://${oracleHost}/live?autoconnect=true&resize=scale`}
+                    src={`https://${oracleHost}${oracleHost.includes('github.dev') || oracleHost.includes(':') ? '/vnc.html' : '/live'}?autoconnect=true&resize=scale`}
                     title="noVNC Browser Stream"
                     style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', border: 'none' }}
                     allowFullScreen

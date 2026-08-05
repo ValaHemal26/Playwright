@@ -244,10 +244,12 @@ const executePlaywrightRun = async (site, minCartValue, customCouponsInput, sock
         await page.waitForTimeout(2000);
         
         // Try clicking a suggestion or pressing ArrowDown + Enter
-        const suggestion = page.locator('[class*="suggestion"], [class*="Suggestion"], [class*="search-result"]').first();
-        if (await suggestion.isVisible({ timeout: 2000 }).catch(() => false)) {
+        const suggestion = page.locator('[class*="suggestion"], [class*="Suggestion"], [class*="predict"], [class*="result"], li, [role="option"]').first();
+        if (await suggestion.isVisible({ timeout: 3000 }).catch(() => false)) {
           await suggestion.click();
         } else {
+          await addressInput.press('ArrowDown');
+          await page.waitForTimeout(500);
           await addressInput.press('ArrowDown');
           await page.waitForTimeout(500);
           await addressInput.press('Enter');
