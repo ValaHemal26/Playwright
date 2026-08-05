@@ -1,0 +1,4 @@
+{
+  "name": "Playwright Automation Environment",
+  "postStartCommand": "bash .devcontainer/startup.sh"
+}
