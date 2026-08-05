@@ -19,8 +19,7 @@ function App() {
   const [minCartValue, setMinCartValue] = useState<number>(300);
   const [customCoupons, setCustomCoupons] = useState<string>('');
   const [headed, setHeaded] = useState<boolean>(true);
-  const [customBackendUrl, setCustomBackendUrl] = useState<string>('');
-  const [oracleHost, setOracleHost] = useState<string>('YOUR_ORACLE_IP');
+  const oracleHost = process.env.REACT_APP_ORACLE_HOST || 'YOUR_ORACLE_IP';
 
   // Execution State
   const [status, setStatus] = useState<'idle' | 'queued' | 'running' | 'done'>('idle');
@@ -66,17 +65,17 @@ function App() {
         socketRef.current.disconnect();
       }
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [customBackendUrl]);
+  }, []);
 
   const connectSocket = () => {
     if (socketRef.current) {
       socketRef.current.disconnect();
     }
 
+    const envBackendUrl = process.env.REACT_APP_BACKEND_URL;
     let backendUrl = '';
-    if (customBackendUrl.trim()) {
-      backendUrl = customBackendUrl.trim();
+    if (envBackendUrl && envBackendUrl.trim()) {
+      backendUrl = envBackendUrl.trim();
     } else if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
       backendUrl = 'http://localhost:5000';
     } else {
@@ -268,32 +267,6 @@ function App() {
                   onChange={(e) => setCustomCoupons(e.target.value)}
                   placeholder="Enter coupon codes separated by commas or new lines."
                 />
-              </div>
-
-              <div className="input-group">
-                <label htmlFor="oracle-host-input">Oracle VM IP / Hostname</label>
-                <input
-                  type="text"
-                  id="oracle-host-input"
-                  value={oracleHost}
-                  onChange={(e) => setOracleHost(e.target.value)}
-                  placeholder="e.g., 129.146.xx.xx"
-                />
-                <span className="input-hint">Points the live remote view frame to your websockify stream.</span>
-              </div>
-
-              <div className="input-group">
-                <label htmlFor="backend-url-input">
-                  Render Backend Gateway <span className="optional-tag">(Optional)</span>
-                </label>
-                <input
-                  type="text"
-                  id="backend-url-input"
-                  placeholder="https://playwright-w337.onrender.com"
-                  value={customBackendUrl}
-                  onChange={(e) => setCustomBackendUrl(e.target.value)}
-                />
-                <span className="input-hint">Specify custom Socket.IO signalling gateway address.</span>
               </div>
 
               <div className="input-group inline-toggle" style={{ display: 'none' }}>
