@@ -9,7 +9,7 @@ WORKDIR /app
 COPY package*.json ./
 
 # Install dependencies (only production dependencies to keep the image slim)
-RUN npm ci --only=production
+RUN npm ci --omit=dev
 
 # Copy the rest of the application files
 COPY . .
