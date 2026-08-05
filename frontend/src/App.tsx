@@ -66,6 +66,7 @@ function App() {
         socketRef.current.disconnect();
       }
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [customBackendUrl]);
 
   const connectSocket = () => {
