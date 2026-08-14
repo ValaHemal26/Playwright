@@ -1,0 +1,62 @@
+import {IconRefresh} from '@tabler/icons-react';
+import {Button, Card, Col, Form, Row, Select, Tooltip} from 'antd';
+import {useTranslation} from 'react-i18next';
+
+import {getSessionInfo} from '../../../utils/attaching-to-session.js';
+import builderStyles from '../SessionBuilder.module.css';
+import styles from './AttachToSession.module.css';
+
+const AttachToSession = ({
+  serverType,
+  attachSessId,
+  setAttachSessId,
+  runningAppiumSessions,
+  getRunningSessions,
+}) => {
+  const {t} = useTranslation();
+  return (
+    <Form>
+      <Form.Item>
+        <Card>
+          <p className={builderStyles.localDesc}>
+            {t('connectToExistingSessionInstructions')}
+            <br />
+            {t('selectSessionIDInDropdown')}
+          </p>
+        </Card>
+      </Form.Item>
+      <Form.Item>
+        <Row>
+          <Col span={23}>
+            <Select
+              showSearch
+              notFoundContent={t('noResultsFound')}
+              placeholder={t('enterYourSessionId')}
+              value={attachSessId || undefined}
+              onChange={(value) => setAttachSessId(value)}
+              options={runningAppiumSessions
+                .slice()
+                .reverse()
+                .map((session) =>
+                  // list is reversed in order to place the most recent sessions at the top
+                  // slice() is added because reverse() mutates the original array
+                  ({value: session.id, label: getSessionInfo(session, serverType)}),
+                )}
+            />
+          </Col>
+          <Col span={1}>
+            <Tooltip title={t('Reload')}>
+              <Button
+                className={styles.btnReload}
+                onClick={getRunningSessions}
+                icon={<IconRefresh size={18} />}
+              />
+            </Tooltip>
+          </Col>
+        </Row>
+      </Form.Item>
+    </Form>
+  );
+};
+
+export default AttachToSession;

@@ -48,14 +48,18 @@ const cleanupProcesses = async () => {
     console.error('Error closing browser context:', err);
   }
 
-  // Force clean any zombie Chromium or Playwright processes on the system
-  exec('pkill -f -9 "chrome|chromium|playwright"', (err) => {
-    if (err) {
-      // Ignore if no processes to kill
-      return;
-    }
-    console.log('✅ Zombie processes terminated.');
-  });
+  // Force clean zombie browser processes (Linux only to protect user's personal browser on Windows)
+  if (process.platform !== 'win32') {
+    exec('pkill -f -9 "chrome|chromium|playwright"', (err) => {
+      if (err) {
+        // Ignore if no processes to kill
+        return;
+      }
+      console.log('✅ Zombie processes terminated.');
+    });
+  } else {
+    console.log('ℹ️ Safe cleanup complete (global taskkill skipped on Windows).');
+  }
 };
 
 const executePlaywrightRun = async (site, minCartValue, customCouponsInput, socket) => {

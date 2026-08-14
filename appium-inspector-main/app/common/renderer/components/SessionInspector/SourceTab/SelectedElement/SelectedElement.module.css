@@ -1,0 +1,102 @@
+.selectedElementCard {
+  display: flex;
+  flex-direction: column;
+}
+
+.selectedElementCard :global(.ant-card-body) {
+  flex: 1;
+  overflow: auto;
+}
+
+.selectedElemInfoMessage {
+  justify-content: center;
+}
+
+.selectedElemActions {
+  gap: 8px;
+}
+
+.elementKeyInputActions {
+  max-width: 400px;
+  flex: 1;
+}
+
+.elementKeyInput {
+  height: 32px;
+  width: calc(100% - 64px);
+}
+
+.selectedElemTableWrapper {
+  display: flex;
+  width: 100%;
+}
+
+.selectedElemTableWrapper > div {
+  width: 100%;
+}
+
+.selectedElemTableCells {
+  word-wrap: break-all;
+  word-break: break-all;
+}
+
+.copyableCell {
+  cursor: pointer;
+}
+
+.selectedElemBoxModelWrapper {
+  height: 90px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+}
+
+.selectedElemWidth {
+  text-align: center;
+}
+
+.selectedElemHeightPlusBoxWrapper {
+  display: flex;
+  align-items: center;
+  height: 100%;
+  gap: 8px;
+}
+
+.selectedElemBoxWrapper {
+  position: relative;
+  flex: 1;
+  height: 70px;
+  border: 1px dashed var(--ant-blue-6);
+  background-color: var(--ant-blue-1);
+}
+
+.selectedElemTopLeft {
+  position: absolute;
+  left: 4px;
+  top: 4px;
+}
+
+.selectedElemTopRight {
+  position: absolute;
+  right: 4px;
+  top: 4px;
+}
+
+.selectedElemMidpoint {
+  display: grid;
+  height: 70px;
+  align-items: center;
+  place-items: center;
+}
+
+.selectedElemBottomLeft {
+  position: absolute;
+  left: 4px;
+  bottom: 4px;
+}
+
+.selectedElemBottomRight {
+  position: absolute;
+  right: 4px;
+  bottom: 4px;
+}
