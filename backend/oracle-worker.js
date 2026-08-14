@@ -41,7 +41,7 @@ const cleanupProcesses = async () => {
   console.log('🧹 Cleaning up Playwright context and browser processes...');
   try {
     if (currentBrowserContext) {
-      await currentBrowserContext.close().catch(() => {});
+      await currentBrowserContext.close().catch(() => { });
       currentBrowserContext = null;
     }
   } catch (err) {
@@ -76,31 +76,45 @@ const executePlaywrightRun = async (site, minCartValue, customCouponsInput, sock
       .split(/[\n,]/)
       .map(c => c.trim().toUpperCase())
       .filter(c => c.length > 0);
-    
+
     sendLog(`📝 Using ${coupons.length} custom user-provided coupons. Skipping scraper step.`, 'info');
   }
 
   try {
     sendLog('🚀 Launching headed browser on Oracle VM (Display :99)...', 'info');
-    
+
     // Launch browser in headed mode inside Xvfb virtual framebuffer
     currentBrowserContext = await chromium.launchPersistentContext('', {
       headless: false, // Must be headed to stream via VNC
       viewport: { width: 1366, height: 768 },
       userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+      permissions: [],
+      tracer: undefined,
       args: [
         '--disable-blink-features=AutomationControlled',
         '--no-sandbox',
         '--disable-setuid-sandbox',
         '--disable-web-security',
         '--window-size=1366,768',
-        '--disable-popup-blocking'
+        '--disable-popup-blocking',
+        '--disable-notifications',
+        '--deny-permission-prompts'
       ],
       ignoreDefaultArgs: ['--enable-automation']
     });
 
+    // Override browser permission defaults via CDP session
+    await currentBrowserContext.grantPermissions([]);
     const page = await currentBrowserContext.newPage();
-    await page.setViewportSize({ width: 1366, height: 768 }).catch(() => {});
+
+    // Inject script to override Notification API inside browser runtime
+    await currentBrowserContext.addInitScript(() => {
+      if (window.Notification) {
+        window.Notification.requestPermission = () => Promise.resolve('denied');
+        Object.defineProperty(window.Notification, 'permission', { get: () => 'denied' });
+      }
+    });
+    await page.setViewportSize({ width: 1366, height: 768 }).catch(() => { });
 
     // Extra Runtime Security Bypass
     await page.addInitScript(() => {
@@ -169,11 +183,12 @@ const executePlaywrightRun = async (site, minCartValue, customCouponsInput, sock
         });
 
         sendLog(`🎉 Scraped ${coupons.length} unique coupons from wethrift.com`, 'success', coupons);
-        await newPage.close().catch(() => {});
+        await newPage.close().catch(() => { });
       } else {
         // grabon.in Scraping
         sendLog('🌐 Navigating to grabon.in...', 'info');
         await page.goto("https://www.grabon.in/", { waitUntil: 'commit' });
+        await page.waitForLoadState('domcontentloaded');
         await delay(1000);
 
         const searchInput = page.locator('input[placeholder="Search for brands, categories"]:visible').first();
@@ -181,9 +196,27 @@ const executePlaywrightRun = async (site, minCartValue, customCouponsInput, sock
         await searchInput.fill('dominos');
         await searchInput.pressSequentially(" ", { delay: 100 });
 
-        sendLog('🔍 Loading search suggestions...', 'info');
-        await page.locator('p, span, a').filter({ hasText: /^dominos$/i }).first().click();
+        sendLog('🔍 Searching for Dominos...', 'info');
+        const dominosText = page.locator('p, span, a').filter({ hasText: /^dominos$/i }).first();
+        
+        let found = await dominosText.isVisible({ timeout: 4000 }).catch(() => false);
+        if (!found) {
+          sendLog('⚠️ Suggestion dropdown did not appear. Retrying search input...', 'warning');
+          await page.locator('body').click({ force: true }).catch(() => {});
+          await delay(500);
+          await searchInput.click();
+          await searchInput.fill('');
+          await searchInput.fill('dominos');
+          await searchInput.pressSequentially(' ', { delay: 100 });
+          found = await dominosText.isVisible({ timeout: 4000 }).catch(() => false);
+        }
 
+        if (found) {
+          await dominosText.click();
+        } else {
+          sendLog('⚠️ Direct suggestion click failed. Navigating directly to GrabOn Dominos page...', 'warning');
+          await page.goto("https://www.grabon.in/dominos-coupons/", { waitUntil: 'domcontentloaded' });
+        }
         await page.waitForLoadState('domcontentloaded');
         await solveCloudflareIfNeeded(page);
 
@@ -246,7 +279,7 @@ const executePlaywrightRun = async (site, minCartValue, customCouponsInput, sock
         await addressInput.click();
         await addressInput.fill('Connaught Place, New Delhi');
         await page.waitForTimeout(2000);
-        
+
         // Try clicking a suggestion or pressing ArrowDown + Enter
         const suggestion = page.locator('[class*="suggestion"], [class*="Suggestion"], [class*="predict"], [class*="result"], li, [role="option"]').first();
         if (await suggestion.isVisible({ timeout: 3000 }).catch(() => false)) {
@@ -384,7 +417,7 @@ io.on('connection', (socket) => {
 
     activeSocket = socket;
     console.log(`🚀 Starting Playwright run requested by client ${socket.id}`);
-    
+
     try {
       await executePlaywrightRun(data.site, data.minCartValue, data.customCoupons, socket);
     } catch (err) {

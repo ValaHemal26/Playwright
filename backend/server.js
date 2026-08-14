@@ -54,9 +54,9 @@ const updateQueuePositions = () => {
   queue.forEach((job, index) => {
     const s = io.sockets.sockets.get(job.socketId);
     if (s) {
-      s.emit('status', { 
-        type: 'queued', 
-        message: `⏳ Request queued. Position: ${index + 1}/${queue.length}` 
+      s.emit('status', {
+        type: 'queued',
+        message: `⏳ Request queued. Position: ${index + 1}/${queue.length}`
       });
     }
   });
@@ -64,7 +64,7 @@ const updateQueuePositions = () => {
 
 const runJobOnOracle = (job, clientSocket) => {
   console.log(`🔗 Connecting to Oracle VM worker at: ${ORACLE_VM_URL}`);
-  
+
   const oracleSocket = ioClient(ORACLE_VM_URL, {
     auth: {
       token: ORACLE_AUTH_TOKEN
@@ -78,7 +78,7 @@ const runJobOnOracle = (job, clientSocket) => {
   oracleSocket.on('connect', () => {
     console.log('✅ Connected to Oracle VM worker socket');
     clientSocket.emit('status', { type: 'running', message: '🚀 Connected to Oracle VM. Starting test run...' });
-    
+
     // Send run-test to Oracle VM
     oracleSocket.emit('run-test', job.data);
   });
@@ -121,9 +121,9 @@ const runJobOnOracle = (job, clientSocket) => {
     if (job.retries < 3) {
       job.retries++;
       const delayMs = job.retries * 3000;
-      clientSocket.emit('status', { 
-        type: 'running', 
-        message: `⚠️ Oracle VM unavailable (${err.message}). Retrying in ${delayMs / 1000}s... (Attempt ${job.retries}/3)` 
+      clientSocket.emit('status', {
+        type: 'running',
+        message: `⚠️ Oracle VM unavailable (${err.message}). Retrying in ${delayMs / 1000}s... (Attempt ${job.retries}/3)`
       });
       setTimeout(() => {
         // Only retry if the client socket is still active
@@ -134,9 +134,9 @@ const runJobOnOracle = (job, clientSocket) => {
         }
       }, delayMs);
     } else {
-      clientSocket.emit('status', { 
-        type: 'error', 
-        message: `❌ Failed to connect to Oracle VM after 3 attempts: ${err.message}` 
+      clientSocket.emit('status', {
+        type: 'error',
+        message: `❌ Failed to connect to Oracle VM after 3 attempts: ${err.message}`
       });
       finishJob();
     }
@@ -185,9 +185,9 @@ io.on('connection', (socket) => {
       retries: 0
     });
 
-    socket.emit('status', { 
-      type: 'queued', 
-      message: `⏳ Request queued. Position: ${queue.length}` 
+    socket.emit('status', {
+      type: 'queued',
+      message: `⏳ Request queued. Position: ${queue.length}`
     });
 
     updateQueuePositions();
@@ -196,7 +196,7 @@ io.on('connection', (socket) => {
 
   socket.on('stop-test', () => {
     console.log(`🛑 Client requested stop: ${socket.id}`);
-    
+
     if (currentJob && currentJob.socketId === socket.id) {
       if (socket.activeOracleSocket) {
         socket.activeOracleSocket.emit('stop-test');
@@ -217,7 +217,7 @@ io.on('connection', (socket) => {
 
   socket.on('disconnect', () => {
     console.log(`🔌 Client disconnected: ${socket.id}`);
-    
+
     if (currentJob && currentJob.socketId === socket.id) {
       if (socket.activeOracleSocket) {
         socket.activeOracleSocket.disconnect();
@@ -305,6 +305,7 @@ app.get('/api/scrape', async (req, res) => {
         headless: actualHeadless,
         viewport: { width: 1366, height: 768 },
         userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+        permissions: [],
         recordVideo: { dir: videosDir, size: { width: 1280, height: 720 } },
         args: [
           '--disable-blink-features=AutomationControlled',
@@ -312,16 +313,22 @@ app.get('/api/scrape', async (req, res) => {
           '--disable-setuid-sandbox',
           '--disable-web-security',
           '--window-size=1366,768',
-          '--disable-popup-blocking'
+          '--disable-popup-blocking',
+          '--disable-notifications',
+          '--deny-permission-prompts'
         ],
         ignoreDefaultArgs: ['--enable-automation']
       });
       page = await context.newPage();
     }
 
-    await page.setViewportSize({ width: 1366, height: 768 }).catch(() => {});
+    await page.setViewportSize({ width: 1366, height: 768 }).catch(() => { });
     await page.addInitScript(() => {
       Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
+      if (window.Notification) {
+        window.Notification.requestPermission = () => Promise.resolve('denied');
+        Object.defineProperty(window.Notification, 'permission', { get: () => 'denied' });
+      }
     });
 
     const solveCloudflareIfNeeded = async (targetPage) => {
@@ -371,16 +378,38 @@ app.get('/api/scrape', async (req, res) => {
           }).filter(code => code.length > 0 && code !== 'Copy');
         });
         sendLog(`🎉 Scraped ${coupons.length} coupons from wethrift.com`, 'success', coupons);
-        await newPage.close().catch(() => {});
+        await newPage.close().catch(() => { });
       } else {
         sendLog('🌐 Navigating to grabon.in...', 'info');
         await page.goto("https://www.grabon.in/", { waitUntil: 'commit' });
+
+        await page.waitForLoadState('domcontentloaded');
         await delay(1000);
         const searchInput = page.locator('input[placeholder="Search for brands, categories"]:visible').first();
         await searchInput.waitFor({ state: 'visible', timeout: 5000 });
         await searchInput.fill('dominos');
         await searchInput.pressSequentially(" ", { delay: 100 });
-        await page.locator('p, span, a').filter({ hasText: /^dominos$/i }).first().click();
+        sendLog('🔍 Searching for Dominos...', 'info');
+        const dominosText = page.locator('p, span, a').filter({ hasText: /^dominos$/i }).first();
+
+        let found = await dominosText.isVisible({ timeout: 4000 }).catch(() => false);
+        if (!found) {
+          sendLog('⚠️ Suggestion dropdown did not appear. Retrying search input...', 'warning');
+          await page.locator('body').click({ force: true }).catch(() => {});
+          await delay(500);
+          await searchInput.click();
+          await searchInput.fill('');
+          await searchInput.fill('dominos');
+          await searchInput.pressSequentially(' ', { delay: 100 });
+          found = await dominosText.isVisible({ timeout: 4000 }).catch(() => false);
+        }
+
+        if (found) {
+          await dominosText.click();
+        } else {
+          sendLog('⚠️ Direct suggestion click failed. Navigating directly to GrabOn Dominos page...', 'warning');
+          await page.goto("https://www.grabon.in/dominos-coupons/", { waitUntil: 'domcontentloaded' });
+        }
         await page.waitForLoadState('domcontentloaded');
         await solveCloudflareIfNeeded(page);
         const cards = page.locator('.gcbr, [id^="cpn_"]');
@@ -407,7 +436,7 @@ app.get('/api/scrape', async (req, res) => {
     if (coupons.length === 0) {
       sendLog('❌ No coupons found. Aborting.', 'error');
       res.end();
-      await context.close().catch(() => {});
+      await context.close().catch(() => { });
       browserClosed = true;
       return;
     }
@@ -442,7 +471,7 @@ app.get('/api/scrape', async (req, res) => {
         }
         await page.waitForTimeout(4000);
       }
-    } catch (err) {}
+    } catch (err) { }
 
     await page.getByText("Pizza Mania").click();
     await page.waitForTimeout(3000);
@@ -499,20 +528,20 @@ app.get('/api/scrape', async (req, res) => {
 
     sendLog('🏁 Coupon verification run completed!', 'success');
     if (context) {
-      await context.close().catch(() => {});
+      await context.close().catch(() => { });
       browserClosed = true;
     }
     res.end();
   } catch (err) {
     sendLog(`❌ Execution error: ${err.message}`, 'error');
     if (context && !browserClosed) {
-      await context.close().catch(() => {});
+      await context.close().catch(() => { });
       browserClosed = true;
     }
     res.end();
   } finally {
-    if (context && !browserClosed) await context.close().catch(() => {});
-    if (browser) await browser.close().catch(() => {});
+    if (context && !browserClosed) await context.close().catch(() => { });
+    if (browser) await browser.close().catch(() => { });
   }
 });
 
