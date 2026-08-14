@@ -1,0 +1,77 @@
+.sourceSearchHighlight {
+  background-color: #ffeb3b;
+  border-radius: 2px;
+}
+
+:global(.dark) .sourceSearchHighlight {
+  background-color: #ecbf3a;
+}
+
+.sourceNodeTag {
+  color: #137dce;
+}
+
+:global(.dark) .sourceNodeTag {
+  color: #298dda;
+}
+
+.sourceNodeAttrName {
+  color: #7c13ec;
+}
+
+:global(.dark) .sourceNodeAttrName {
+  color: #a450ff;
+}
+
+.sourceNodeAttrValue {
+  color: #e34cde;
+}
+
+:global(.dark) .sourceNodeAttrValue {
+  color: #ea61e5;
+}
+
+.treeContainer {
+  height: 100%;
+}
+
+.treeWrapper {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  gap: 8px;
+}
+
+.treeActions {
+  gap: 8px;
+}
+
+.treeSearchInput {
+  max-width: 400px;
+  flex: 1;
+}
+
+.treeSearchInputAddon {
+  min-width: 46px;
+  justify-content: center;
+}
+
+.sourceTree {
+  flex: 1;
+  overflow: auto;
+  --ant-tree-title-height: 18px !important;
+  --ant-tree-indent-size: 18px !important;
+}
+
+.sourceTree :global(.ant-tree-treenode) {
+  margin-bottom: 2px;
+}
+
+.sourceTree :global(.ant-tree-node-content-wrapper) {
+  margin: 0 0 2px 4px;
+}
+
+.sourceTree :global(.ant-tree-switcher-icon) {
+  font-size: 14px !important;
+  vertical-align: middle !important;
+}

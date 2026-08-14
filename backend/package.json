@@ -19,6 +19,7 @@
     "playwright": "^1.62.0",
     "express": "^5.2.1",
     "socket.io": "^4.7.5",
-    "socket.io-client": "^4.7.5"
+    "socket.io-client": "^4.7.5",
+    "@maximegris/node-websockify": "^1.0.7"
   }
 }

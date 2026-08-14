@@ -1,0 +1,25 @@
+# Configuration for automatically generated release notes
+
+changelog:
+  categories:
+    - title: 🚀 New Features
+      labels:
+        - enhancement
+    - title: 🎨 Design Changes
+      labels:
+        - style
+    - title: 🛠 Fixes
+      labels:
+        - fix
+    - title: 📖 Documentation
+      labels:
+        - documentation
+    - title: 🌐 Localization
+      labels:
+        - i18n
+    - title: 🔍 Other Changes
+      labels:
+        - '*'
+      exclude:
+        authors:
+          - renovate[bot]

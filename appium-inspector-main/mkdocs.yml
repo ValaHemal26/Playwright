@@ -1,0 +1,56 @@
+INHERIT: ./node_modules/@appium/docutils/base-mkdocs.yml
+site_name: Appium Inspector
+repo_url: https://github.com/appium/appium-inspector
+repo_name: appium/appium-inspector
+copyright: |
+  <p>Copyright <a href="https://openjsf.org">OpenJS Foundation</a> and Appium contributors. All rights reserved. The <a href="https://openjsf.org">OpenJS Foundation</a> has registered trademarks and uses trademarks.  For a list of trademarks of the <a href="https://openjsf.org">OpenJS Foundation</a>, please see our <a href="https://trademark-policy.openjsf.org">Trademark Policy</a> and <a href="https://trademark-list.openjsf.org">Trademark List</a>. Trademarks and logos not indicated on the <a href="https://trademark-list.openjsf.org">list of OpenJS Foundation trademarks</a> are trademarks&trade; or registered&reg; trademarks of their respective holders. Use of them does not imply any affiliation with or endorsement by them.</p>
+  <p><a href="https://openjsf.org">The OpenJS Foundation</a> | <a href="https://terms-of-use.openjsf.org">Terms of Use</a> | <a href="https://privacy-policy.openjsf.org">Privacy Policy</a> | <a href="https://bylaws.openjsf.org">Bylaws</a> | <a href="https://code-of-conduct.openjsf.org">Code of Conduct</a> | <a href="https://trademark-policy.openjsf.org">Trademark Policy</a> | <a href="https://trademark-list.openjsf.org">Trademark List</a> | <a href="https://www.linuxfoundation.org/cookies">Cookie Policy</a></p>
+  <a href="#__consent">Change cookie settings</a>
+site_url: https://appium.github.io/appium-inspector
+edit_uri: edit/main/docs
+site_description: Appium Inspector Documentation
+docs_dir: docs
+site_dir: site
+
+theme:
+  logo: assets/images/icon.png
+  favicon: assets/images/icon.png
+  custom_dir: docs/overrides
+extra_css:
+  - assets/stylesheets/extra.css
+
+extra:
+  homepage: /appium-inspector
+  version:
+    provider: mike
+  social:
+    - icon: fontawesome/brands/twitter
+      link: https://twitter.com/AppiumDevs
+
+nav:
+  - index.md
+  - overview.md
+  - Quickstart:
+      - quickstart/index.md
+      - quickstart/requirements.md
+      - quickstart/installation.md
+      - quickstart/starting-a-session.md
+  - menu-bar.md
+  - Session Builder:
+      - session-builder/index.md
+      - session-builder/app-settings.md
+      - session-builder/server-details.md
+      - session-builder/capability-builder.md
+      - session-builder/saved-capability-sets.md
+      - session-builder/attach-to-session.md
+  - Session Inspector:
+      - session-inspector/index.md
+      - session-inspector/header.md
+      - session-inspector/screenshot.md
+      - session-inspector/source.md
+      - session-inspector/commands.md
+      - session-inspector/gestures.md
+      - session-inspector/recorder.md
+      - session-inspector/session-info.md
+  - troubleshooting.md
+  - contributing.md

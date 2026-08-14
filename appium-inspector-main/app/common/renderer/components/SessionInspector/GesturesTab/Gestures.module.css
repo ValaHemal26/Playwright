@@ -1,0 +1,82 @@
+.gestureHeaderTitle {
+  font-size: 18px;
+  font-weight: 500;
+  box-shadow: none !important;
+  border-width: 0px !important;
+}
+
+.gestureHeaderDescription {
+  padding-left: 32px;
+}
+
+.gestureHeaderDescriptionInput {
+  font-size: 15px;
+  font-weight: 400;
+  color: #636363;
+  box-shadow: none !important;
+  border-width: 0px !important;
+}
+
+.gestureEditorDivider {
+  margin: 10px 0;
+}
+
+.timelineTickTitle {
+  text-align: center;
+}
+
+.gestureTimeline {
+  width: 90%;
+  margin: -10px 0;
+  min-height: 32px;
+}
+
+.gestureTimeline :global(.ant-steps-item-finish .ant-steps-item-icon),
+.gestureTimeline :global(.ant-steps-item-rail-finish) {
+  color: var(--timelineColor);
+  border-color: var(--timelineColor);
+}
+
+.gestureTimeline :global(.ant-steps-item-wait .ant-steps-item-icon),
+.gestureTimeline :global(.ant-steps-item-rail-wait) {
+  color: #ffffff;
+  border-color: #ffffff;
+}
+
+:global(.dark) .gestureTimeline :global(.ant-steps-item-wait .ant-steps-item-icon),
+:global(.dark) .gestureTimeline :global(.ant-steps-item-rail-wait) {
+  color: #141414;
+  border-color: #141414;
+}
+
+.tickInputBox {
+  display: block;
+  text-align: center;
+}
+
+.tickCard :global(.ant-card-head) {
+  min-height: unset;
+  padding: 0px;
+  border-bottom: none;
+}
+
+.tickCard :global(.ant-card-body) {
+  padding-top: 6px;
+  height: calc(100% - 25px);
+}
+
+.tickPlusBtnWrapper {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+}
+
+.pointerTitle {
+  max-width: 65px;
+  padding: 0 0 0 0;
+  text-align: center;
+  text-decoration: underline;
+  text-decoration-thickness: 20%;
+}
