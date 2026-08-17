@@ -12,14 +12,17 @@
   "license": "ISC",
   "type": "commonjs",
   "devDependencies": {
-    "@types/node": "^26.1.2"
+    "@types/node": "^26.1.2",
+    "appium-uiautomator2-driver": "^8.4.0"
   },
   "dependencies": {
+    "@maximegris/node-websockify": "^1.0.7",
     "@playwright/test": "^1.62.0",
-    "playwright": "^1.62.0",
+    "appium": "^3.6.0",
     "express": "^5.2.1",
+    "playwright": "^1.62.0",
     "socket.io": "^4.7.5",
     "socket.io-client": "^4.7.5",
-    "@maximegris/node-websockify": "^1.0.7"
+    "webdriverio": "^9.30.1"
   }
 }
