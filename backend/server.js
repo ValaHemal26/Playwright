@@ -25,17 +25,131 @@ if (!fs.existsSync(videosDir)) {
 // Serve public/videos folder statically
 app.use('/videos', express.static(videosDir));
 
+app.use(express.json());
+
 // Enable CORS for cross-origin frontend requests
 app.use((req, res, next) => {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept');
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+  if (req.method === 'OPTIONS') {
+    return res.sendStatus(200);
+  }
   next();
 });
 
 // Serves a simple health check status at root
 app.get('/', (req, res) => {
   res.json({ status: 'running', service: 'scraper-backend', mode: 'socket-io-enabled' });
+});
+
+// ==========================================
+// APPIUM DOMINOS AUTOMATION CONTROLLER
+// ==========================================
+let dominosProcess = null;
+let dominosStatus = {
+  running: false,
+  logs: [],
+  results: [],
+  config: null
+};
+
+// GET connected ADB devices
+app.get('/api/devices', (req, res) => {
+  try {
+    const { execSync } = require('child_process');
+    const androidHome = process.env.ANDROID_HOME || process.env.ANDROID_SDK_ROOT || (process.env.LOCALAPPDATA ? path.join(process.env.LOCALAPPDATA, 'Android', 'Sdk') : 'C:\\Users\\Hemal\\AppData\\Local\\Android\\Sdk');
+    const adbExe = path.join(androidHome, 'platform-tools', 'adb.exe');
+    const adbCmd = fs.existsSync(adbExe) ? `"${adbExe}"` : 'adb';
+    const output = execSync(`${adbCmd} devices`, { encoding: 'utf8' });
+    const lines = output.split('\n');
+    const devices = [];
+    for (const line of lines) {
+      if (line.includes('\tdevice')) {
+        devices.push(line.split('\t')[0].trim());
+      }
+    }
+    res.json({ success: true, devices });
+  } catch (err) {
+    res.json({ success: false, devices: [], error: err.message });
+  }
+});
+
+// POST start dominos appium automation
+app.post('/api/dominos/start', (req, res) => {
+  if (dominosStatus.running) {
+    return res.status(400).json({ success: false, message: 'Automation test is already running!' });
+  }
+
+  const { udid, minCartValue, appPackage, appActivity, couponSource, customCoupons } = req.body || {};
+  const { spawn } = require('child_process');
+
+  dominosStatus = {
+    running: true,
+    logs: [],
+    results: [],
+    config: { udid, minCartValue, appPackage, appActivity, couponSource, customCoupons },
+    startTime: new Date().toISOString()
+  };
+
+  io.emit('dominos:status', { type: 'started', status: dominosStatus });
+
+  const env = {
+    ...process.env,
+    TARGET_UDID: udid || '',
+    MIN_CART_VALUE: String(minCartValue || 400),
+    APP_PACKAGE: appPackage || 'com.Dominos',
+    APP_ACTIVITY: appActivity || 'com.Dominos.activity.alias.LauncherDefaultAlias',
+    COUPON_SOURCE: couponSource || 'cache',
+    CUSTOM_COUPONS: Array.isArray(customCoupons) ? customCoupons.join(',') : (customCoupons || '')
+  };
+
+  dominosProcess = spawn('node', ['appium-dominos.js'], {
+    cwd: __dirname,
+    env,
+    shell: true
+  });
+
+  const appendLog = (data, type = 'info') => {
+    const text = data.toString();
+    const logObj = { message: text, type, timestamp: new Date().toLocaleTimeString() };
+    dominosStatus.logs.push(logObj);
+    io.emit('dominos:log', logObj);
+  };
+
+  dominosProcess.stdout.on('data', (data) => appendLog(data, 'info'));
+  dominosProcess.stderr.on('data', (data) => appendLog(data, 'error'));
+
+  dominosProcess.on('close', (code) => {
+    dominosStatus.running = false;
+    dominosStatus.endTime = new Date().toISOString();
+    dominosProcess = null;
+    io.emit('dominos:status', { type: 'finished', exitCode: code, status: dominosStatus });
+  });
+
+  res.json({ success: true, message: 'Dominos automation started', config: dominosStatus.config });
+});
+
+// POST stop dominos automation
+app.post('/api/dominos/stop', (req, res) => {
+  if (!dominosStatus.running || !dominosProcess) {
+    return res.json({ success: true, message: 'No automation test is currently running.' });
+  }
+
+  try {
+    dominosProcess.kill('SIGINT');
+    dominosStatus.running = false;
+    dominosProcess = null;
+    io.emit('dominos:status', { type: 'stopped', status: dominosStatus });
+    res.json({ success: true, message: 'Automation test stopped successfully.' });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// GET current status
+app.get('/api/dominos/status', (req, res) => {
+  res.json(dominosStatus);
 });
 
 // Helper for delay
@@ -395,7 +509,7 @@ app.get('/api/scrape', async (req, res) => {
         let found = await dominosText.isVisible({ timeout: 4000 }).catch(() => false);
         if (!found) {
           sendLog('⚠️ Suggestion dropdown did not appear. Retrying search input...', 'warning');
-          await page.locator('body').click({ force: true }).catch(() => {});
+          await page.locator('body').click({ force: true }).catch(() => { });
           await delay(500);
           await searchInput.click();
           await searchInput.fill('');

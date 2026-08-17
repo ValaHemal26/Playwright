@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { io, Socket } from 'socket.io-client';
+import { DominosAdminDashboard } from './components/DominosAdminDashboard';
 
 interface LogLine {
   text: string;
@@ -14,6 +15,8 @@ interface CouponResult {
 }
 
 function App() {
+  const [activeTab, setActiveTab] = useState<'appium' | 'web'>('appium');
+
   // Form State
   const [site, setSite] = useState<string>('wethrift');
   const [minCartValue, setMinCartValue] = useState<number>(300);
@@ -204,19 +207,54 @@ function App() {
 
   return (
     <>
-      <div className="glow-container">
-        <div className="glow-orb glow-orb-1"></div>
-        <div className="glow-orb glow-orb-2"></div>
+      <div style={{ backgroundColor: '#0f172a', borderBottom: '1px solid #1e293b', padding: '12px 24px', display: 'flex', gap: '12px' }}>
+        <button
+          style={{
+            padding: '8px 16px',
+            borderRadius: '8px',
+            border: `1px solid ${activeTab === 'appium' ? '#38bdf8' : '#334155'}`,
+            backgroundColor: activeTab === 'appium' ? 'rgba(56, 189, 248, 0.15)' : '#1e293b',
+            color: activeTab === 'appium' ? '#38bdf8' : '#94a3b8',
+            fontWeight: 600,
+            cursor: 'pointer',
+          }}
+          onClick={() => setActiveTab('appium')}
+        >
+          📱 Mobile Appium Dominos Dashboard
+        </button>
+        <button
+          style={{
+            padding: '8px 16px',
+            borderRadius: '8px',
+            border: `1px solid ${activeTab === 'web' ? '#38bdf8' : '#334155'}`,
+            backgroundColor: activeTab === 'web' ? 'rgba(56, 189, 248, 0.15)' : '#1e293b',
+            color: activeTab === 'web' ? '#38bdf8' : '#94a3b8',
+            fontWeight: 600,
+            cursor: 'pointer',
+          }}
+          onClick={() => setActiveTab('web')}
+        >
+          🌐 Web Playwright Scraper Dashboard
+        </button>
       </div>
 
-      <div className="app-container">
-        <header className="app-header">
-          <div className="logo-area">
-            <span className="logo-icon">%</span>
-            <h1>AutoSave</h1>
+      {activeTab === 'appium' ? (
+        <DominosAdminDashboard />
+      ) : (
+        <>
+          <div className="glow-container">
+            <div className="glow-orb glow-orb-1"></div>
+            <div className="glow-orb glow-orb-2"></div>
           </div>
-          <p className="tagline">Playwright Live Headed Scraper & Checkout verification platform</p>
-        </header>
+
+          <div className="app-container">
+            <header className="app-header">
+              <div className="logo-area">
+                <span className="logo-icon">%</span>
+                <h1>AutoSave</h1>
+              </div>
+              <p className="tagline">Playwright Live Headed Scraper & Checkout verification platform</p>
+            </header>
 
         <main className="dashboard-grid">
           {/* Input Panel */}
@@ -419,6 +457,8 @@ function App() {
         </main>
       </div>
     </>
+  )}
+</>
   );
 }
 

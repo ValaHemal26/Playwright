@@ -1,28 +1,22 @@
-/**
- * appium-dominos.js
- * 
- * Flow:
- * 1. Scrape Dominos coupon codes from GrabOn using Playwright (Chromium).
- * 2. Initialize Appium session via WebdriverIO.
- * 3. Launch the Dominos App on the connected real Android device.
- * 4. Add items to the cart (or fallback to manual cart preparation).
- * 5. Navigate to the offers/coupons screen.
- * 6. Loop through scraped coupons, apply them, check results, and compile status.
- * 7. Output a summary table.
- */
-
 const { chromium } = require('playwright');
 const { remote } = require('webdriverio');
 const { spawn } = require('child_process');
 const path = require('path');
 const net = require('net');
+const fs = require('fs');
 
-// Config options
-const APP_PACKAGE = 'com.Dominos';
-const APP_ACTIVITY = 'com.Dominos.activity.alias.LauncherRepublicAlias';
-const MIN_CART_VALUE = 400; // Target minimum cart value to qualify for coupons
+const detectedSdk = (process.env.LOCALAPPDATA ? path.join(process.env.LOCALAPPDATA, 'Android', 'Sdk') : 'C:\\Users\\Hemal\\AppData\\Local\\Android\\Sdk');
+if (!process.env.ANDROID_HOME || !fs.existsSync(process.env.ANDROID_HOME)) {
+  process.env.ANDROID_HOME = detectedSdk;
+}
+if (!process.env.ANDROID_SDK_ROOT || !fs.existsSync(process.env.ANDROID_SDK_ROOT)) {
+  process.env.ANDROID_SDK_ROOT = detectedSdk;
+}
 
-// Delay helper
+const APP_PACKAGE = process.env.APP_PACKAGE || 'com.Dominos';
+const APP_ACTIVITY = process.env.APP_ACTIVITY || 'com.Dominos.activity.alias.LauncherDefaultAlias';
+const MIN_CART_VALUE = parseInt(process.env.MIN_CART_VALUE || '400', 10);
+
 const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 let appiumProcess = null;
@@ -84,18 +78,35 @@ function waitForPort(port, timeoutMs = 90000) {
 
 // Helper to start Appium Server
 async function startAppiumServer(port = 4725) {
+  const androidHome = process.env.ANDROID_HOME || process.env.ANDROID_SDK_ROOT || (process.env.LOCALAPPDATA ? path.join(process.env.LOCALAPPDATA, 'Android', 'Sdk') : 'C:\\Users\\Hemal\\AppData\\Local\\Android\\Sdk');
+
+  // If port is in use, attempt to kill old appium instance to ensure clean SDK environment
   const inUse = await isPortInUse(port);
   if (inUse) {
-    console.log(`\nℹ️ [Appium] Appium server is already running on port ${port}. Reusing it.`);
-    return;
+    try {
+      const { execSync } = require('child_process');
+      const netstat = execSync(`netstat -ano | findstr :${port}`, { encoding: 'utf8' });
+      for (const line of netstat.split('\n')) {
+        if (line.includes('LISTENING')) {
+          const parts = line.trim().split(/\s+/);
+          const pid = parts[parts.length - 1];
+          if (pid && pid !== '0') {
+            console.log(`🧹 [Appium] Cleaning up old server process on port ${port} (PID ${pid})...`);
+            execSync(`taskkill /F /PID ${pid}`, { stdio: 'ignore' });
+            await delay(1500);
+          }
+        }
+      }
+    } catch (e) { }
   }
 
-  console.log(`\n🚀 [Appium] Starting Appium server programmatically on port ${port}...`);
+  console.log(`\n🚀 [Appium] Starting Appium server programmatically on port ${port} (SDK: ${androidHome})...`);
   spawnedAppium = true;
-  appiumProcess = spawn('npx', ['appium', '--port', String(port)], {
+  appiumProcess = spawn('npx', ['appium', '--port', String(port), '--allow-cors'], {
     env: {
       ...process.env,
-      ANDROID_HOME: 'd:\\playwright'
+      ANDROID_HOME: androidHome,
+      ANDROID_SDK_ROOT: androidHome,
     },
     cwd: __dirname, // Run in backend directory to find installed drivers (uiautomator2)
     shell: true,
@@ -154,20 +165,27 @@ async function dismissPopups(driver) {
   }
 }
 
-const fs = require('fs');
-
 /**
  * Scrape coupon codes using Playwright (or load from local coupons.json cache)
  */
 async function scrapeCoupons() {
+  if (process.env.CUSTOM_COUPONS) {
+    const list = process.env.CUSTOM_COUPONS.split(',').map(c => c.trim()).filter(Boolean);
+    if (list.length > 0) {
+      console.log(`⚡ [Coupons] Loaded ${list.length} custom user-provided coupons.`);
+      return list;
+    }
+  }
+
+  const couponSource = process.env.COUPON_SOURCE || 'cache';
   const jsonPath = path.join(__dirname, 'coupons.json');
 
   // Check if coupons.json exists and read from cache first
-  if (fs.existsSync(jsonPath)) {
+  if (couponSource !== 'scrape' && fs.existsSync(jsonPath)) {
     try {
       const cachedData = JSON.parse(fs.readFileSync(jsonPath, 'utf8'));
       if (Array.isArray(cachedData) && cachedData.length > 0) {
-        console.log(`⚡ [Coupons] Loaded ${cachedData.length} coupons directly from local cache (coupons.json). Skipping web scraping!`);
+        console.log(`⚡ [Coupons] Loaded ${cachedData.length} coupons directly from local cache (coupons.json).`);
         return cachedData;
       }
     } catch (e) {
@@ -245,14 +263,24 @@ async function findElementWithFallbacks(driver, selectors, description = 'elemen
 const { execSync } = require('child_process');
 
 function getOnlineUdid() {
+  if (process.env.TARGET_UDID && process.env.TARGET_UDID.trim()) {
+    return process.env.TARGET_UDID.trim();
+  }
   try {
-    const output = execSync('"d:\\playwright\\platform-tools\\adb.exe" devices', { encoding: 'utf8' });
+    const androidHome = process.env.ANDROID_HOME || process.env.ANDROID_SDK_ROOT || (process.env.LOCALAPPDATA ? path.join(process.env.LOCALAPPDATA, 'Android', 'Sdk') : 'C:\\Users\\Hemal\\AppData\\Local\\Android\\Sdk');
+    const adbExe = path.join(androidHome, 'platform-tools', 'adb.exe');
+    const adbCmd = fs.existsSync(adbExe) ? `"${adbExe}"` : 'adb';
+    const output = execSync(`${adbCmd} devices`, { encoding: 'utf8' });
     const lines = output.split('\n');
+    const devices = [];
     for (const line of lines) {
       if (line.includes('\tdevice')) {
-        return line.split('\t')[0].trim();
+        devices.push(line.split('\t')[0].trim());
       }
     }
+    // Prefer IP address endpoint over mDNS auto-discovered names
+    const ipDevice = devices.find(d => /^\d+\.\d+\.\d+\.\d+:\d+$/.test(d));
+    return ipDevice || devices[0];
   } catch (e) { }
   return undefined;
 }
@@ -410,24 +438,24 @@ async function testCouponsOnMobile(coupons) {
         'android=new UiSelector().text("Cart")',
         '//*[@content-desc="Cart"]',
       ], 'View Cart Floating Bar / Cart Tab');
-      
+
       if (opened) {
         await delay(2000);
         await dismissPopups(driver);
         return true;
       }
-      
+
       opened = await clickFast([
         'android=new UiSelector().resourceId("com.Dominos:id/ivCart")',
         'android=new UiSelector().resourceId("com.Dominos:id/iv_cart")',
       ], 'Cart Icon');
-      
+
       if (opened) {
         await delay(2000);
         await dismissPopups(driver);
         return true;
       }
-      
+
       console.log('⚠️ [Appium] Could not navigate to Cart directly.');
       return false;
     };
@@ -435,7 +463,7 @@ async function testCouponsOnMobile(coupons) {
     // Helper: Extract Cart Subtotal (excluding taxes/fees)
     const getCartSubtotal = async () => {
       console.log('🛒 [Appium] Attempting to find cart subtotal...');
-      
+
       // Try to scroll to see the bill details
       await scrollIntoViewByText("Subtotal").catch(() => null);
       await scrollIntoViewByText("Item Value").catch(() => null);
@@ -457,14 +485,14 @@ async function testCouponsOnMobile(coupons) {
             if (await el.isDisplayed().catch(() => false)) {
               const text = await el.getText().catch(() => '');
               console.log(`🛒 [Appium] Found potential subtotal text element: "${text}"`);
-              
+
               const match = text.match(/₹\s*(\d+(\.\d+)?)/) || text.match(/(\d+(\.\d+)?)/);
               if (match) {
                 const val = parseFloat(match[1]);
                 console.log(`🛒 [Appium] Parsed subtotal: ₹${val}`);
                 return val;
               }
-              
+
               const parent = await el.$('..');
               const siblingTexts = await parent.$$('android.widget.TextView');
               for (const sib of siblingTexts) {
@@ -509,7 +537,7 @@ async function testCouponsOnMobile(coupons) {
 
       let onCart = await goToCartScreen();
       let currentSubtotal = 0;
-      
+
       if (onCart) {
         currentSubtotal = await getCartSubtotal();
         console.log(`🛒 [Appium] Current Cart Subtotal: ₹${currentSubtotal}`);
@@ -523,7 +551,7 @@ async function testCouponsOnMobile(coupons) {
       }
 
       console.log(`🛒 [Appium] Subtotal (₹${currentSubtotal}) is below target (₹${targetValue}). Going to menu to add items...`);
-      
+
       if (onCart) {
         await goBackToMenu();
       }
@@ -539,11 +567,11 @@ async function testCouponsOnMobile(coupons) {
 
       let attempts = 0;
       const maxAttempts = 8;
-      
+
       while (currentSubtotal < targetValue && attempts < maxAttempts) {
         attempts++;
         console.log(`🍕 [Appium] Adding item loop (Attempt ${attempts}/${maxAttempts}). Current subtotal: ₹${currentSubtotal}`);
-        
+
         let addBtns = await driver.$$('android=new UiSelector().text("ADD")').catch(() => []);
         if (addBtns.length === 0) {
           addBtns = await driver.$$('android=new UiSelector().textContains("Add")').catch(() => []);
@@ -559,7 +587,7 @@ async function testCouponsOnMobile(coupons) {
             'android=new UiSelector().textContains("ADD ITEM")',
             'android=new UiSelector().textContains("CONTINUE")',
           ], 'Modal Size/Crust Add Button');
-          
+
           await delay(1000);
           await dismissPopups(driver);
         } else {
@@ -582,7 +610,7 @@ async function testCouponsOnMobile(coupons) {
             }
           }
         }
-        
+
         if (!foundBar) {
           await scrollDownOnce();
         }
@@ -594,7 +622,7 @@ async function testCouponsOnMobile(coupons) {
         currentSubtotal = await getCartSubtotal();
         console.log(`🛒 [Appium] Final verified Cart Subtotal: ₹${currentSubtotal}`);
       }
-      
+
       return currentSubtotal >= targetValue;
     };
 
