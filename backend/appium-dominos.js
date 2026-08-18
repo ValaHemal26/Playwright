@@ -368,14 +368,26 @@ async function scrapeCoupons() {
 
 async function dismissPopups(driver) {
   const popupSelectors = [
+    // Google Play Services Location Accuracy Prompt -> Strictly Click "No, thanks"
+    { selector: 'android=new UiSelector().text("No, thanks")', desc: 'Click "No, thanks" (Reject Location)' },
+    { selector: 'android=new UiSelector().text("No thanks")', desc: 'Click "No thanks" (Reject Location)' },
+    { selector: 'android=new UiSelector().text("NO THANKS")', desc: 'Click "NO THANKS" (Reject Location)' },
+    { selector: 'android=new UiSelector().textContains("No, thanks")', desc: 'Click "No, thanks"' },
+    { selector: 'android=new UiSelector().textContains("No thanks")', desc: 'Click "No thanks"' },
+    { selector: 'android=new UiSelector().resourceId("com.google.android.gms:id/negative_button")', desc: 'GMS "No thanks" Button' },
+    { selector: 'android=new UiSelector().resourceId("android:id/button2")', desc: 'System Dialog "No thanks" Button' },
+
+    // Android Runtime Permissions -> Deny / While Using App fallback
+    { selector: 'android=new UiSelector().text("Don\'t allow")', desc: 'Runtime Permission - Don\'t allow' },
+    { selector: 'android=new UiSelector().text("Deny")', desc: 'Runtime Permission - Deny' },
+    { selector: 'android=new UiSelector().text("Only this time")', desc: 'Runtime Permission - Only this time' },
+    { selector: 'android=new UiSelector().text("While using the app")', desc: 'Runtime Permission - While using app' },
+
+    // Domino's In-App Popups & Promos
     { selector: 'android=new UiSelector().resourceId("com.Dominos:id/tv_cta")', desc: 'Allow Location CTA' },
-    { selector: 'android=new UiSelector().textContains("Allow")', desc: 'System Allow Button' },
     { selector: 'android=new UiSelector().text("Yay! Thanks")', desc: 'Yay Thanks Free Delivery Popup' },
     { selector: 'android=new UiSelector().text("OK")', desc: 'OK Alert Dismiss' },
     { selector: 'android=new UiSelector().text("Ok")', desc: 'Ok Alert Dismiss' },
-    { selector: 'android=new UiSelector().text("No, thanks")', desc: 'Google Location Accuracy No thanks button' },
-    { selector: 'android=new UiSelector().text("No thanks")', desc: 'Google Location Accuracy No thanks button' },
-    { selector: 'android=new UiSelector().text("NO THANKS")', desc: 'Google Location Accuracy No thanks button' },
     { selector: 'android=new UiSelector().resourceId("com.Dominos:id/ivClose")', desc: 'Close Ad Banner' },
     { selector: 'android=new UiSelector().resourceId("com.Dominos:id/iv_customisation_crossTap")', desc: 'Close Customize Modal' }
   ];
@@ -525,8 +537,10 @@ const navigateToMenuScreen = async (driver) => {
   console.log('📱 [Appium] Checking if on Domino\'s Home screen and navigating to Menu...');
   await dismissPopups(driver);
 
-  // Look for Delivery / Explore Menu / Order Now buttons on Home page
+  // Look for Bottom Nav "Menu" tab, Delivery, or Explore Menu buttons
   const enteredMenu = await clickFast(driver, [
+    'android=new UiSelector().text("Menu")',
+    'android=new UiSelector().description("Menu")',
     'android=new UiSelector().textContains("Explore Menu")',
     'android=new UiSelector().textContains("EXPLORE MENU")',
     'android=new UiSelector().textContains("Order Now")',
@@ -536,8 +550,7 @@ const navigateToMenuScreen = async (driver) => {
     'android=new UiSelector().textContains("Everyday Value")',
     'android=new UiSelector().resourceId("com.Dominos:id/btn_delivery")',
     'android=new UiSelector().resourceId("com.Dominos:id/ll_delivery")',
-    'android=new UiSelector().text("Menu")',
-  ], 'Home -> Explore Menu / Delivery / Category Tile');
+  ], 'Bottom Nav "Menu" / Explore Menu / Delivery Entry');
 
   if (enteredMenu) {
     await delay(1800);
@@ -676,94 +689,140 @@ const selectCategory = async (driver, preferredCategory = 'Pizza Mania') => {
 };
 
 const ensureCartHasMinSubtotal = async (driver, targetValue) => {
-  console.log(`\n🛒 [Appium] Ensuring cart has at least ₹${targetValue} subtotal...`);
+  // Enforce a 15% safety buffer above minimum target (e.g. ₹400 -> ₹460) to guarantee MOV eligibility
+  const targetThreshold = Math.ceil(targetValue * 1.15);
+  console.log(`\n🛒 [Appium] Target Cart Total: ₹${targetThreshold} (Base ₹${targetValue} + 15% safety buffer for coupon MOV)`);
 
-  // First ensure we are inside the Menu / Catalog view
+  // Step 1: Ensure we are inside the Menu / Catalog view
   await navigateToMenuScreen(driver);
 
+  // Step 2: Check current subtotal (in case cart already has items)
   let currentSubtotal = await getCartSubtotal(driver);
-  if (currentSubtotal >= targetValue) {
-    console.log(`✅ [Appium] Current subtotal (₹${currentSubtotal}) is already >= target (₹${targetValue}).`);
+  console.log(`🛒 [Appium] Initial Cart Subtotal: ₹${currentSubtotal}`);
+
+  if (currentSubtotal >= targetThreshold) {
+    console.log(`✅ [Appium] Cart already has ₹${currentSubtotal} (>= required ₹${targetThreshold}). Ready for coupon testing.`);
     return true;
   }
 
-  // Navigate to Pizza Mania / Veg Pizza
+  // Step 3: Select initial category
   await selectCategory(driver, 'Pizza Mania');
 
   let attempts = 0;
-  const maxAttempts = 8;
+  const maxAttempts = 10;
+  const categoriesToTry = ['Pizza Mania', 'Veg Pizza', 'Bestsellers', 'No Onion No Garlic'];
+  let catIndex = 0;
 
-  while (currentSubtotal < targetValue && attempts < maxAttempts) {
+  while (currentSubtotal < targetThreshold && attempts < maxAttempts) {
     attempts++;
-    console.log(`🍕 [Appium] Adding item loop (Attempt ${attempts}/${maxAttempts}). Current subtotal: ₹${currentSubtotal}`);
+    console.log(`🍕 [Appium] Adding Item #${attempts} (Current: ₹${currentSubtotal} / Target: ₹${targetThreshold})...`);
 
+    // 1. Locate all visible ADD buttons on current screen
     let addBtns = await driver.$$('android=new UiSelector().text("ADD")').catch(() => []);
     if (addBtns.length === 0) {
       addBtns = await driver.$$('android=new UiSelector().text("Add +")').catch(() => []);
     }
     if (addBtns.length === 0) {
-      addBtns = await driver.$$('android=new UiSelector().textContains("Add")').catch(() => []);
+      addBtns = await driver.$$('android=new UiSelector().textContains("ADD")').catch(() => []);
+    }
+    if (addBtns.length === 0) {
+      addBtns = await driver.$$('android=new UiSelector().resourceId("com.Dominos:id/btn_add_to_cart")').catch(() => []);
+    }
+    if (addBtns.length === 0) {
+      addBtns = await driver.$$('android=new UiSelector().resourceId("com.Dominos:id/btnAdd")').catch(() => []);
     }
 
+    let addedItem = false;
+
+    // 2. Click first clickable ADD button
     if (addBtns.length > 0) {
       for (const btn of addBtns) {
         if (await btn.isDisplayed().catch(() => false)) {
-          console.log('🍕 [Appium] Tapping "ADD" button...');
-          await btn.click().catch(() => null);
+          console.log('🍕 [Appium] Tapping "ADD" on pizza card...');
+          try {
+            await btn.click();
+          } catch (_) {
+            const loc = await btn.getLocation().catch(() => null);
+            const sz = await btn.getSize().catch(() => null);
+            if (loc && sz) {
+              await driver.performActions([{
+                type: 'pointer', id: 'finger1', parameters: { pointerType: 'touch' },
+                actions: [
+                  { type: 'pointerMove', duration: 0, x: Math.floor(loc.x + sz.width / 2), y: Math.floor(loc.y + sz.height / 2) },
+                  { type: 'pointerDown', button: 0 },
+                  { type: 'pause', duration: 100 },
+                  { type: 'pointerUp', button: 0 }
+                ]
+              }]).catch(() => null);
+            }
+          }
+
+          addedItem = true;
           await delay(1500);
 
-          // Handle Customization Size/Crust Modal
+          // 3. Handle Customization / Crust / Size Modal if it pops up
           await clickFast(driver, [
             'android=new UiSelector().text("Add +")',
             'android=new UiSelector().resourceId("com.Dominos:id/btn_add_customization")',
             'android=new UiSelector().textContains("ADD ITEM")',
             'android=new UiSelector().textContains("Add")',
             'android=new UiSelector().textContains("CONTINUE")',
-          ], 'Modal Size/Crust Add Button');
+            'android=new UiSelector().text("Continue")',
+            'android=new UiSelector().resourceId("com.Dominos:id/btn_add")',
+          ], 'Customization Modal Add Button');
 
           await delay(1000);
           await dismissPopups(driver);
           break;
         }
       }
+    }
+
+    // 4. If no buttons were clickable on current viewport, scroll down
+    if (!addedItem) {
+      console.log('🍕 [Appium] Scrolling down to find more pizza items...');
+      await scrollDownOnce(driver);
+      await delay(1000);
+    }
+
+    // 5. Read updated subtotal from the floating "View Cart" bar
+    const parsedBarTotal = await getCartSubtotal(driver);
+    if (parsedBarTotal > 0) {
+      currentSubtotal = parsedBarTotal;
+      console.log(`🛒 [Appium] Updated Cart Subtotal: ₹${currentSubtotal}`);
     } else {
-      console.log('🍕 [Appium] No ADD buttons visible. Scrolling down...');
+      // Estimated increment if bar text not parsed
+      currentSubtotal += 129;
+      console.log(`🛒 [Appium] Estimated Cart Subtotal: ~₹${currentSubtotal}`);
+    }
+
+    // 6. Check if target threshold is achieved
+    if (currentSubtotal >= targetThreshold) {
+      console.log(`🎯 [Appium] Reached required cart threshold (₹${currentSubtotal} >= ₹${targetThreshold})!`);
+      break;
+    }
+
+    // 7. If still below target after 2 additions in this category, switch to next category
+    if (attempts % 2 === 0 && catIndex < categoriesToTry.length - 1) {
+      catIndex++;
+      console.log(`🔄 [Category] Switching to next category: "${categoriesToTry[catIndex]}" to add variety...`);
+      await selectCategory(driver, categoriesToTry[catIndex]);
+      await delay(1200);
+    } else {
       await scrollDownOnce(driver);
-    }
-
-    // Try reading subtotal from the View Cart bar
-    const cartBarEls = await driver.$$('android=new UiSelector().textContains("Item")').catch(() => []);
-    let foundBar = false;
-    for (const el of cartBarEls) {
-      if (await el.isDisplayed().catch(() => false)) {
-        const text = await el.getText().catch(() => '');
-        const val = parseMoney(text);
-        if (val !== null && val > 0) {
-          currentSubtotal = val;
-          console.log(`🛒 [Appium] Updated subtotal from floating bar: ₹${currentSubtotal}`);
-          foundBar = true;
-          break;
-        }
-      }
-    }
-
-    if (!foundBar) {
-      await scrollDownOnce(driver);
-    }
-
-    // Switch to fallback category if needed
-    if (currentSubtotal < targetValue && attempts % 2 === 0) {
-      await selectCategory(driver, 'No Onion No Garlic');
     }
   }
 
-  console.log('🛒 [Appium] Finished adding items. Navigating to Cart...');
+  // Step 4: Open Cart Screen and perform final total verification
+  console.log('\n🛒 [Appium] Opening Cart Screen to confirm items & bill breakdown...');
   const openedCart = await goToCartScreen(driver);
   if (openedCart) {
-    currentSubtotal = await getCartSubtotal(driver);
-    console.log(`🛒 [Appium] Final verified Cart Subtotal: ₹${currentSubtotal}`);
+    const verifiedTotal = await getCartSubtotal(driver);
+    if (verifiedTotal > 0) currentSubtotal = verifiedTotal;
+    console.log(`✅ [Appium] Verified Final Cart Subtotal on Cart Screen: ₹${currentSubtotal}`);
   }
 
+  console.log(`🚀 [Appium] Cart is ready with ₹${currentSubtotal}. Transitioning to Coupon Testing Phase!`);
   return currentSubtotal >= targetValue;
 };
 
