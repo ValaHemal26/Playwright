@@ -47,6 +47,19 @@ app.get('/', (req, res) => {
 // APPIUM DOMINOS AUTOMATION CONTROLLER
 // ==========================================
 let dominosProcess = null;
+// Auto-configure Android SDK in PATH
+const detectedSdk = process.env.LOCALAPPDATA ? path.join(process.env.LOCALAPPDATA, 'Android', 'Sdk') : 'C:\\Users\\Hemal\\AppData\\Local\\Android\\Sdk';
+if (!process.env.ANDROID_HOME || !fs.existsSync(process.env.ANDROID_HOME)) {
+  process.env.ANDROID_HOME = detectedSdk;
+}
+if (!process.env.ANDROID_SDK_ROOT || !fs.existsSync(process.env.ANDROID_SDK_ROOT)) {
+  process.env.ANDROID_SDK_ROOT = detectedSdk;
+}
+const platformTools = path.join(detectedSdk, 'platform-tools');
+if (fs.existsSync(platformTools) && !process.env.PATH.includes(platformTools)) {
+  process.env.PATH = `${platformTools};${process.env.PATH}`;
+}
+
 let dominosStatus = {
   running: false,
   logs: [],
@@ -54,24 +67,125 @@ let dominosStatus = {
   config: null
 };
 
-// GET connected ADB devices
+// Helper to get ADB command
+function getAdbExecutable() {
+  const adbExe = path.join(process.env.ANDROID_HOME, 'platform-tools', process.platform === 'win32' ? 'adb.exe' : 'adb');
+  return fs.existsSync(adbExe) ? `"${adbExe}"` : 'adb';
+}
+
+// POST connect wireless ADB device
+app.post('/api/devices/connect', (req, res) => {
+  const { ip, port } = req.body || {};
+  const target = req.body.target || (ip && port ? `${ip}:${port}` : ip);
+  
+  if (!target) {
+    return res.status(400).json({ success: false, message: 'Target IP:PORT is required' });
+  }
+
+  try {
+    const { execSync } = require('child_process');
+    const adbCmd = getAdbExecutable();
+    const output = execSync(`${adbCmd} connect ${target}`, { encoding: 'utf8', timeout: 10000 });
+    console.log(`[ADB Connect] ${output.trim()}`);
+    const connected = output.includes('connected') && !output.includes('cannot connect') && !output.includes('failed');
+    
+    res.json({
+      success: connected,
+      message: output.trim(),
+      target
+    });
+  } catch (err) {
+    res.json({
+      success: false,
+      message: err.message,
+      target
+    });
+  }
+});
+
+// GET connected ADB devices & installed apps
 app.get('/api/devices', (req, res) => {
   try {
     const { execSync } = require('child_process');
-    const androidHome = process.env.ANDROID_HOME || process.env.ANDROID_SDK_ROOT || (process.env.LOCALAPPDATA ? path.join(process.env.LOCALAPPDATA, 'Android', 'Sdk') : 'C:\\Users\\Hemal\\AppData\\Local\\Android\\Sdk');
-    const adbExe = path.join(androidHome, 'platform-tools', 'adb.exe');
-    const adbCmd = fs.existsSync(adbExe) ? `"${adbExe}"` : 'adb';
-    const output = execSync(`${adbCmd} devices`, { encoding: 'utf8' });
-    const lines = output.split('\n');
-    const devices = [];
+    const adbCmd = getAdbExecutable();
+
+    let output = execSync(`${adbCmd} devices -l`, { encoding: 'utf8' });
+    let lines = output.split('\n');
+    let devices = [];
+
     for (const line of lines) {
       if (line.includes('\tdevice')) {
-        devices.push(line.split('\t')[0].trim());
+        const parts = line.trim().split(/\s+/);
+        const udid = parts[0];
+        let model = '';
+        const modelMatch = line.match(/model:(\S+)/);
+        if (modelMatch) {
+          model = modelMatch[1].replace(/_/g, ' ');
+        }
+        devices.push({ udid, model, raw: line });
       }
     }
-    res.json({ success: true, devices });
+
+    // Check if any device is an mDNS auto-discovered handle without direct IP connection
+    const mdnsDevice = devices.find(d => d.udid.startsWith('adb-'));
+    const ipDevice = devices.find(d => /^\d+\.\d+\.\d+\.\d+:\d+$/.test(d.udid));
+
+    // Auto-connect IP if user provided or found in environment
+    if (!ipDevice && mdnsDevice) {
+      console.log(`[ADB] Found mDNS device ${mdnsDevice.udid}. Checking active connections...`);
+    }
+
+    // Format list of simple UDID strings for backward compatibility + detailed objects
+    const deviceUdids = devices.map(d => d.udid);
+
+    // Get third-party installed app packages for selected/first device
+    let installedApps = [];
+    const targetDevice = ipDevice ? ipDevice.udid : (devices[0] ? devices[0].udid : '');
+
+    if (targetDevice) {
+      try {
+        const pkgOutput = execSync(`${adbCmd} -s "${targetDevice}" shell pm list packages -3`, { encoding: 'utf8', timeout: 5000 });
+        const pkgs = pkgOutput.split('\n')
+          .map(l => l.replace('package:', '').trim())
+          .filter(Boolean);
+
+        // Map popular/common packages to user friendly display names
+        const knownApps = {
+          'com.Dominos': "Domino's Pizza",
+          'in.swiggy.android.toing': 'Swiggy',
+          'com.application.zomato': 'Zomato',
+          'com.zeptoconsumerapp': 'Zepto',
+          'net.one97.paytm': 'Paytm',
+          'com.phonepe.app': 'PhonePe',
+          'com.rapido.passenger': 'Rapido',
+          'com.app.uengage.lapinoz': "La Pino'z Pizza",
+          'com.grocurystore.app': 'Blinkit',
+          'com.whatsapp': 'WhatsApp',
+          'com.instagram.android': 'Instagram',
+          'org.telegram.messenger': 'Telegram',
+          'in.startv.hotstar': 'Disney+ Hotstar',
+          'com.nextbillion.groww': 'Groww',
+          'in.upstox.app': 'Upstox',
+          'com.ludo.king': 'Ludo King',
+        };
+
+        installedApps = pkgs.map(pkg => ({
+          package: pkg,
+          name: knownApps[pkg] || pkg
+        })).sort((a, b) => a.name.localeCompare(b.name));
+      } catch (e) {
+        console.error('Error fetching installed packages:', e.message);
+      }
+    }
+
+    res.json({
+      success: true,
+      devices: deviceUdids,
+      deviceDetails: devices,
+      installedApps
+    });
   } catch (err) {
-    res.json({ success: false, devices: [], error: err.message });
+    res.json({ success: false, devices: [], installedApps: [], error: err.message });
   }
 });
 
@@ -94,13 +208,28 @@ app.post('/api/dominos/start', (req, res) => {
 
   io.emit('dominos:status', { type: 'started', status: dominosStatus });
 
+  // If UDID looks like wireless IP:PORT, auto-connect via adb connect
+  if (udid && (/^\d+\.\d+\.\d+\.\d+(:\d+)?$/.test(udid.trim()))) {
+    try {
+      const { execSync } = require('child_process');
+      const adbCmd = getAdbExecutable();
+      const connOutput = execSync(`${adbCmd} connect ${udid.trim()}`, { encoding: 'utf8', timeout: 8000 });
+      console.log(`[Start Auto-Connect] ${connOutput.trim()}`);
+    } catch (e) {
+      console.warn(`[Start Auto-Connect Warning] ${e.message}`);
+    }
+  }
+
   const env = {
     ...process.env,
+    ANDROID_HOME: process.env.ANDROID_HOME,
+    ANDROID_SDK_ROOT: process.env.ANDROID_SDK_ROOT,
+    PATH: `${path.join(process.env.ANDROID_HOME, 'platform-tools')};${process.env.PATH}`,
     TARGET_UDID: udid || '',
     MIN_CART_VALUE: String(minCartValue || 400),
     APP_PACKAGE: appPackage || 'com.Dominos',
     APP_ACTIVITY: appActivity || 'com.Dominos.activity.alias.LauncherDefaultAlias',
-    COUPON_SOURCE: couponSource || 'cache',
+    COUPON_SOURCE: couponSource || 'wethrift',
     CUSTOM_COUPONS: Array.isArray(customCoupons) ? customCoupons.join(',') : (customCoupons || '')
   };
 
@@ -137,7 +266,15 @@ app.post('/api/dominos/stop', (req, res) => {
   }
 
   try {
-    dominosProcess.kill('SIGINT');
+    const pid = dominosProcess.pid;
+    if (process.platform === 'win32' && pid) {
+      const { exec } = require('child_process');
+      exec(`taskkill /F /T /PID ${pid}`, (err) => {
+        if (err) console.error('Taskkill error:', err.message);
+      });
+    } else {
+      dominosProcess.kill('SIGKILL');
+    }
     dominosStatus.running = false;
     dominosProcess = null;
     io.emit('dominos:status', { type: 'stopped', status: dominosStatus });

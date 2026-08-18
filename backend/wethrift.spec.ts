@@ -141,9 +141,22 @@ test('scrape wethrift', async ({ playwright }) => {
 
     await expect(page.getByText("Cart").first()).toBeVisible({ timeout: 10000 });
 
-    await expect(page.getByText("View All Offers")).toBeVisible();
+    // const isViewOffer = expect(page.getByText("View All Offers")).toBeVisible();
 
-    await page.getByText("View All Offers").click();
+    // if(isViewOffer.length == 0){
+    //  await expect(page.getByText("Apply Coupon")).toBeVisible();
+    // }
+
+    // await page.getByText("View All Offers").click();
+    const viewOfferBtn = page.getByText("View All Offers");
+    const applyCouponBtn = page.getByText("Apply Coupon");
+
+    if (await viewOfferBtn.isVisible()) {
+      await viewOfferBtn.click();
+    } else {
+      await expect(applyCouponBtn).toBeVisible();
+      await applyCouponBtn.click();
+    }
 
     await expect(page.getByPlaceholder("Type Offer code here…")).toBeVisible();
 

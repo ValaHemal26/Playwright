@@ -1,0 +1,362 @@
+================================================================================
+DOMINO'S MOBILE APP & WEB AUTOMATION MASTER GUIDE & STEP-BY-STEP PROCEDURE
+================================================================================
+Document ID       : DOMINOS-E2E-AUTO-GUIDE-001
+Target System     : Domino's Pizza India (Android Mobile App & Web Portal)
+Technology Stack  : Appium 2.x + UiAutomator2 + WebdriverIO + Playwright + Node.js
+Package Info      : Package: com.Dominos | Activity: com.Dominos.activity.alias.LauncherDefaultAlias
+Web Portal URL    : https://www.dominos.co.in/ | https://pizzaonline.dominos.co.in/
+================================================================================
+
+TABLE OF CONTENTS:
+--------------------------------------------------------------------------------
+1. ARCHITECTURE & WORKFLOW OVERVIEW
+2. DOMINOS WEB AUTOMATION REVIEW (wethrift.spec.ts ANALYSIS)
+3. PREREQUISITES & ENVIRONMENT SETUP (ANDROID + APPIUM)
+4. CONNECTING ANDROID DEVICE (USB & WIRELESS ADB PAIRING)
+5. APPIUM INSPECTOR SETUP & LOCATOR EXTRACTION
+6. COMPLETE STEP-BY-STEP ANDROID AUTOMATION PROCEDURE
+7. HANDLING ANDROID MOBILE SPECIFIC CHALLENGES & FLAKINESS
+8. QUICK COMMAND CHEAT SHEET & TROUBLESHOOTING
+================================================================================
+
+
+================================================================================
+1. ARCHITECTURE & WORKFLOW OVERVIEW
+================================================================================
+The end-to-end automation architecture integrates Web and Mobile layers:
+
+   +-----------------------------------------------------------------------+
+   |                        DYNAMIC DATA EXTRACTION                        |
+   | Playwright headless/hardened browser scrapes live coupons & promo     |
+   | codes from aggregators (Wethrift / GrabOn / CouponDunia)              |
+   +-----------------------------------+-----------------------------------+
+                                       |
+                                       v
+   +-----------------------------------+-----------------------------------+
+   |                     COUPON REPOSITORY (JSON/MEMORY)                   |
+   | Stores extracted valid coupon codes for dynamic mobile testing        |
+   +-----------------------------------+-----------------------------------+
+                                       |
+                                       v
+   +-----------------------------------+-----------------------------------+
+   |                    ANDROID MOBILE APP AUTOMATION                      |
+   | Appium 2.x + UiAutomator2 driver drives physical Android device or    |
+   | emulator running the official Domino's Pizza India app (com.Dominos)  |
+   +-----------------------------------+-----------------------------------+
+                                       |
+                                       v
+   +-----------------------------------+-----------------------------------+
+   |                     REAL-TIME VALIDATION & AUDIT                      |
+   | Adds pizzas -> Checks cart total (>= Rs. 400) -> Iterates coupons ->  |
+   | Asserts valid/invalid response -> Logs savings & bill breakdown       |
+   +-----------------------------------------------------------------------+
+
+
+================================================================================
+2. DOMINOS WEB AUTOMATION REVIEW (wethrift.spec.ts ANALYSIS)
+================================================================================
+In `backend/wethrift.spec.ts`, the web automation performs two tasks:
+1. Scrapes coupon codes from Wethrift with Cloudflare Turnstile bypass.
+2. Navigates to Domino's web portal and tests extracted coupons.
+
+HOW PROPER DOMINOS WEB AUTOMATION SHOULD BE PERFORMED:
+--------------------------------------------------------------------------------
+1. Direct Portal Access:
+   - Instead of navigating to the static homepage (dominos.co.in) and clicking
+     "ORDER ONLINE NOW", directly navigate to `https://pizzaonline.dominos.co.in/`
+     to avoid intermediate redirection and landing page popups.
+
+2. Resilient Popup Handling:
+   - Domino's web triggers asynchronous modals: "Location Prompt", "Ask Later",
+     "Skip", and "Don't Miss Out".
+   - Use safe dismiss helpers with `.catch(() => {})` instead of rigid assertions.
+
+3. Location & Store Setup:
+   - Dominos web requires a delivery address to fetch correct store menus.
+   - For automation, pre-set a fixed pincode/location (e.g. Vadodara, Bangalore, Mumbai)
+     via browser geolocation override or explicit address search input.
+
+4. Dynamic Cart Minimum Threshold:
+   - Dynamically verify cart subtotal before applying coupons. Most Dominos
+     coupons require a minimum order value (MOV) of Rs. 350 to Rs. 400.
+
+5. Coupon Input State Management:
+   - On success, Dominos transforms the coupon input into a "Coupon Applied" state
+     with a "Remove" button.
+   - To test subsequent coupons, always click "Remove", wait for the discount to
+     clear, and re-open the "Type Offer code here" input drawer.
+
+
+================================================================================
+3. PREREQUISITES & ENVIRONMENT SETUP (ANDROID + APPIUM)
+================================================================================
+Before running Android mobile automation, install and configure the following:
+
+[A] Install Java Development Kit (JDK 11 or 17):
+    - Download and install JDK 11 or JDK 17 (OpenJDK or Oracle).
+    - Set environment variable:
+        JAVA_HOME = C:\Program Files\Java\jdk-17
+        Add to PATH: %JAVA_HOME%\bin
+
+[B] Install Android SDK & Command Line Tools:
+    - Default location on Windows:
+        C:\Users\<Username>\AppData\Local\Android\Sdk
+    - Set environment variables:
+        ANDROID_HOME = C:\Users\<Username>\AppData\Local\Android\Sdk
+        ANDROID_SDK_ROOT = C:\Users\<Username>\AppData\Local\Android\Sdk
+    - Add to system PATH:
+        %ANDROID_HOME%\platform-tools
+        %ANDROID_HOME%\tools
+        %ANDROID_HOME%\cmdline-tools\latest\bin
+
+[C] Install Node.js Dependencies & Appium 2.x:
+    Open PowerShell or Terminal and run:
+    ----------------------------------------------------------------------------
+    npm install -g appium
+    appium driver install uiautomator2
+    appium driver list  # Verify 'uiautomator2' is installed
+    ----------------------------------------------------------------------------
+
+[D] Prepare Domino's Android App:
+    - Install Domino's Pizza India from Google Play Store or sideload APK:
+      Package Name : com.Dominos
+      Activity Name: com.Dominos.activity.alias.LauncherDefaultAlias
+
+
+================================================================================
+4. CONNECTING ANDROID DEVICE (USB & WIRELESS ADB PAIRING)
+================================================================================
+
+--- METHOD 1: USB DEBUGGING (WIRED) ---
+1. On Android Device: Go to Settings -> About Phone -> Tap "Build Number" 7 times.
+2. Go to Settings -> System -> Developer Options.
+3. Enable "USB Debugging".
+4. Connect phone via USB cable and tap "Always allow from this computer".
+5. Run in PowerShell:
+   adb devices
+   # Output should show: <device_serial> device
+
+--- METHOD 2: WIRELESS DEBUGGING (ANDROID 11+) ---
+1. Ensure PC and Mobile Device are on the SAME Wi-Fi network.
+2. Go to Settings -> Developer Options -> Wireless Debugging -> Turn ON.
+3. Tap "Pair device with pairing code".
+   You will see:
+   - Wi-Fi pairing code: 6-digit number (e.g., 314936)
+   - IP address & Port: (e.g., 192.168.29.77:41571)
+4. On your PC run:
+   adb pair 192.168.29.77:41571 314936
+   # Result: Successfully paired to 192.168.29.77:41571
+5. Note the primary IP address & port shown on the main Wireless Debugging screen
+   (e.g., 192.168.29.77:34371).
+6. Connect via ADB:
+   adb connect 192.168.29.77:34371
+7. Verify connection:
+   adb devices
+
+
+================================================================================
+5. APPIUM INSPECTOR SETUP & LOCATOR EXTRACTION
+================================================================================
+To inspect Domino's mobile elements and verify locators:
+
+1. Start Appium Server in terminal:
+   appium --port 4725 --relaxed-security
+
+2. Download & Launch Appium Inspector (https://github.com/appium/appium-inspector).
+3. Set Remote Host: `127.0.0.1`, Remote Port: `4725`, Remote Path: `/`
+4. Enter Desired Capabilities JSON:
+   {
+     "platformName": "Android",
+     "appium:automationName": "UiAutomator2",
+     "appium:appPackage": "com.Dominos",
+     "appium:appActivity": "com.Dominos.activity.alias.LauncherDefaultAlias",
+     "appium:noReset": true,
+     "appium:autoGrantPermissions": true,
+     "appium:newCommandTimeout": 3600
+   }
+5. Click "Start Session" to inspect the live app layout and copy UISelectors.
+
+
+================================================================================
+6. COMPLETE STEP-BY-STEP ANDROID AUTOMATION PROCEDURE
+================================================================================
+
+--------------------------------------------------------------------------------
+STEP 1: INITIALIZE DRIVER & LAUNCH APPLICATION
+--------------------------------------------------------------------------------
+- Action: Connect WebdriverIO remote client to Appium server.
+- WebdriverIO Options:
+  ```javascript
+  const driver = await remote({
+    hostname: '127.0.0.1',
+    port: 4725,
+    path: '/',
+    capabilities: {
+      platformName: 'Android',
+      'appium:automationName': 'UiAutomator2',
+      'appium:appPackage': 'com.Dominos',
+      'appium:appActivity': 'com.Dominos.activity.alias.LauncherDefaultAlias',
+      'appium:noReset': true,
+      'appium:autoGrantPermissions': true,
+      'appium:ensureWebviewsHavePages': true,
+      'appium:nativeWebScreenshot': true,
+      'appium:newCommandTimeout': 3600
+    }
+  });
+  ```
+- Popup Handling:
+  * Check and click "Allow Location" / "While using the app".
+  * Dismiss promo popups / close icons (`com.Dominos:id/ivClose` or `text("Skip")`).
+
+--------------------------------------------------------------------------------
+STEP 2: HOME-TO-MENU NAVIGATION & CATEGORY SELECTION (SCROLL FIRST)
+--------------------------------------------------------------------------------
+- Objective: Transition from Home screen into Menu and select target category ("Pizza Mania").
+- Why Initial Scroll is Needed:
+  * Upon app launch, the Domino's app lands on the Home/Feed screen displaying promo banners.
+  * Category tabs ("Pizza Mania", "Veg Pizza") and pizza cards are positioned below the hero carousel or inside the "Explore Menu" / "Delivery" catalog.
+- Execution Logic:
+  1. Entry Check: Tap "Explore Menu", "Delivery", or "Order Now" if on landing screen.
+  2. Vertical Scroll: Perform a vertical swipe (`performActions` touch scroll) down to bring category cards and pizza items into the active viewport.
+  3. Category Tap: Attempt to tap "Pizza Mania" / "Everyday Value" or "Veg Pizza".
+  4. Horizontal Swipe: If category tabs are rendered horizontally at the top, perform horizontal swipes on the tab container to bring "Pizza Mania" into view.
+  5. Fallback Sequence: If "Pizza Mania" is not available in the current store/location, fall back to "Veg Pizza" -> "Bestsellers" -> "No Onion No Garlic".
+
+--------------------------------------------------------------------------------
+STEP 3: ADD PIZZAS UNTIL MINIMUM CART VALUE (Rs. 400) IS REACHED
+--------------------------------------------------------------------------------
+- Objective: Build cart value exceeding coupon Minimum Order Value (MOV).
+- Target Pizzas: ["Classic", "Paneer & Capsicum", "Onion", "Golden Corn", "Veggie Fiesta"]
+- Execution Loop:
+  1. Find target pizza card:
+     `const item = $('android=new UiSelector().textContains("<Pizza Name>")');`
+  2. Locate and tap "Add +" button on card:
+     `const addBtn = $('android=new UiSelector().text("Add +")'); await addBtn.click();`
+  3. Handle Customization Sheet (if crust/size dialog pops up):
+     - Check if customization header is visible: `textContains("Change Size")`
+     - Confirm choice by clicking drawer "Add +" button:
+       `$('android=new UiSelector().resourceId("com.Dominos:id/btn_add_customization")').click();`
+  4. Dismiss "Yay! Thanks" / "FREE Delivery Unlocked" prompt if triggered.
+  5. Check cart price subtotal displayed on bottom floating bar:
+     `const priceText = await $('android=new UiSelector().resourceId("com.Dominos:id/tv_cart_price")').getText();`
+  6. Repeat adding items until parsed subtotal >= Rs. 400.
+
+--------------------------------------------------------------------------------
+STEP 4: NAVIGATE TO CART SCREEN
+--------------------------------------------------------------------------------
+- Action: Tap bottom floating "View Cart" button.
+- Locator: `$('android=new UiSelector().textContains("View Cart")')` OR `$('android=new UiSelector().resourceId("com.Dominos:id/btn_view_cart")')`
+- Verification: Assert Cart screen header ("Cart") and verify added items count.
+
+--------------------------------------------------------------------------------
+STEP 5: OPEN OFFERS & COUPONS SECTION
+--------------------------------------------------------------------------------
+- Action: Click on "Apply Coupon" / "Coupons" link on Cart screen.
+- Locator: `$('android=new UiSelector().text("Coupons")')` OR `$('android=new UiSelector().textContains("Apply Coupon")')`
+- Result: "Offers & Coupons" page opens with coupon code entry input.
+
+--------------------------------------------------------------------------------
+STEP 6: DYNAMIC COUPON TESTING & VALIDATION LOOP
+--------------------------------------------------------------------------------
+- Input Dataset: Loaded from `coupons.json` or live Playwright scraper.
+- For EACH coupon code:
+  1. Locate coupon input box:
+     `const input = $('android=new UiSelector().className("android.widget.EditText")');`
+  2. Clear and type coupon:
+     `await input.click();`
+     `await input.setValue(couponCode);`
+  3. Hide soft keyboard to prevent UI occlusion:
+     `await driver.hideKeyboard().catch(() => {});`
+  4. Tap "Apply" button:
+     `const applyBtn = $('android=new UiSelector().text("Apply")'); await applyBtn.click();`
+  5. Evaluate Response:
+     - CASE A (Invalid/Expired):
+       * Element `textContains("invalid or expired")` or `resourceId("com.Dominos:id/tv_error_msg")` appears.
+       * Record status: FAILED with error message.
+       * Clear input for next coupon.
+     - CASE B (Success/Discount Applied):
+       * Element `textContains("Applied")` or `textContains("saved")` appears.
+       * Parse discount amount (e.g., "-Rs. 80").
+       * Record status: SUCCESS.
+       * Inspect Bill Details (Step 7).
+       * Tap "Remove" coupon button to reset cart for subsequent test runs.
+
+--------------------------------------------------------------------------------
+STEP 7: INSPECT BILL DETAILS BREAKDOWN MODAL
+--------------------------------------------------------------------------------
+- Action: Tap "View Details" under the "To Pay" bill summary.
+- Locator: `$('android=new UiSelector().text("View Details")')`
+- Assertions:
+  * Item Total: Sum of selected pizzas.
+  * Coupon Discount: Verified against parsed coupon savings.
+  * Taxes & Delivery Charges: Accurately calculated.
+  * Final Payable Amount: (Item Total - Discount + Taxes).
+- Action: Dismiss modal via close button (`text("X")` or `driver.back()`).
+
+--------------------------------------------------------------------------------
+STEP 8: TEST TEARDOWN & REPORTING
+--------------------------------------------------------------------------------
+- Action:
+  1. Print structured summary table in terminal (`console.table`).
+  2. Save results into JSON / HTML test report.
+  3. Gracefully end Appium session: `await driver.deleteSession();`
+
+
+================================================================================
+7. HANDLING ANDROID MOBILE SPECIFIC CHALLENGES & FLAKINESS
+================================================================================
+1. Dynamic Soft Keyboard Occlusion:
+   - Issue: The Android virtual keyboard blocks the "Apply" button.
+   - Fix: Always invoke `await driver.hideKeyboard().catch(() => {})` immediately
+     after entering coupon text.
+
+2. Asynchronous Delivery Popups ("Yay! Thanks"):
+   - Issue: Dominos shows animated celebratory popups when reaching free delivery threshold.
+   - Fix: Implement an automatic dismiss helper after every item addition:
+     ```javascript
+     async function dismissPopups(driver) {
+       const yayBtn = await driver.$('android=new UiSelector().text("Yay! Thanks")');
+       if (await yayBtn.isDisplayed().catch(() => false)) await yayBtn.click();
+     }
+     ```
+
+3. Horizontal Category Scrolling:
+   - Issue: "Pizza Mania" or "Veg Pizza" may be scrolled off-screen.
+   - Fix: Use UiScrollable with horizontal list configuration:
+     `android=new UiScrollable(new UiSelector().scrollable(true)).setAsHorizontalList().scrollIntoView(new UiSelector().text("Pizza Mania"))`
+
+4. Wireless Debugging Port Changes:
+   - Issue: Android changes wireless debugging port upon reconnection.
+   - Fix: Re-run `adb connect <IP>:<NEW_PORT>` or use a fixed USB connection during CI/CD.
+
+
+================================================================================
+8. QUICK COMMAND CHEAT SHEET & TROUBLESHOOTING
+================================================================================
+
+[A] ADB Commands:
+----------------------------------------------------------------------------
+adb devices                                   # List connected devices
+adb kill-server && adb start-server           # Restart ADB daemon
+adb pair 192.168.29.77:<PAIRING_PORT> <code>  # Pair wireless device
+adb connect 192.168.29.77:<CONNECT_PORT>      # Connect wireless device
+adb shell am start -n com.Dominos/com.Dominos.activity.alias.LauncherDefaultAlias # Launch app
+adb shell pm clear com.Dominos                # Reset app data (if needed)
+
+[B] Appium Server Commands:
+----------------------------------------------------------------------------
+appium --port 4725 --relaxed-security         # Launch Appium on port 4725
+netstat -ano | findstr :4725                  # Check if Appium port is open
+
+[C] Running Test Scripts in This Project:
+----------------------------------------------------------------------------
+# Run Web Scraper (Wethrift / GrabOn Playwright test):
+npx playwright test backend/wethrift.spec.ts --headed
+
+# Run Android End-to-End Appium Automation Script:
+node backend/appium-dominos.js
+
+# Launch Interactive Full-Stack Automation Dashboard (Frontend + Backend):
+npm run dev
+================================================================================

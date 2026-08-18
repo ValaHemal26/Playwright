@@ -12,20 +12,32 @@ interface LogEntry {
   timestamp: string;
 }
 
+interface InstalledApp {
+  package: string;
+  name: string;
+}
+
+interface DeviceDetail {
+  udid: string;
+  model: string;
+}
+
 export const DominosAdminDashboard: React.FC = () => {
   // Config state
   const [devices, setDevices] = useState<string[]>([]);
+  const [deviceDetails, setDeviceDetails] = useState<DeviceDetail[]>([]);
+  const [installedApps, setInstalledApps] = useState<InstalledApp[]>([]);
   const [selectedUdid, setSelectedUdid] = useState<string>('');
-  const [customUdid, setCustomUdid] = useState<string>('192.168.29.77:46721');
+  const [customUdid, setCustomUdid] = useState<string>('192.168.29.77:45013');
   const [useCustomUdid, setUseCustomUdid] = useState<boolean>(false);
   
   const [minCartValue, setMinCartValue] = useState<number>(400);
   
-  const [appPreset, setAppPreset] = useState<string>('dominos_default');
+  const [appPreset, setAppPreset] = useState<string>('com.Dominos');
   const [appPackage, setAppPackage] = useState<string>('com.Dominos');
   const [appActivity, setAppActivity] = useState<string>('com.Dominos.activity.alias.LauncherDefaultAlias');
   
-  const [couponSource, setCouponSource] = useState<string>('cache');
+  const [couponSource, setCouponSource] = useState<string>('wethrift');
   const [customCoupons, setCustomCoupons] = useState<string>('PIZZAPARTY, PARTY200, NEW90');
   
   // Execution state
@@ -33,20 +45,49 @@ export const DominosAdminDashboard: React.FC = () => {
   const [logs, setLogs] = useState<LogEntry[]>([]);
   const [showGuide, setShowGuide] = useState<boolean>(true);
   const [fetchingDevices, setFetchingDevices] = useState<boolean>(false);
+  const [connectingAdb, setConnectingAdb] = useState<boolean>(false);
+  const [connectStatusMsg, setConnectStatusMsg] = useState<string>('');
 
   const logsEndRef = useRef<HTMLDivElement>(null);
   const socketRef = useRef<Socket | null>(null);
 
   const BACKEND_URL = 'http://localhost:5000';
 
-  // Fetch online ADB devices
+  // Connect wireless ADB device
+  const connectAdb = async (targetIp: string) => {
+    if (!targetIp || !targetIp.trim()) {
+      alert('Please enter an IP:PORT address (e.g. 192.168.29.77:45013)');
+      return;
+    }
+    setConnectingAdb(true);
+    setConnectStatusMsg('Connecting to device via ADB...');
+    try {
+      const res = await fetch(`${BACKEND_URL}/api/devices/connect`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ target: targetIp.trim() })
+      });
+      const data = await res.json();
+      setConnectStatusMsg(data.message || (data.success ? 'Connected!' : 'Connection failed'));
+      await fetchDevices();
+    } catch (err: any) {
+      setConnectStatusMsg(`Connection error: ${err.message}`);
+    } finally {
+      setConnectingAdb(false);
+    }
+  };
+
+  // Fetch online ADB devices & installed apps
   const fetchDevices = async () => {
     setFetchingDevices(true);
     try {
       const res = await fetch(`${BACKEND_URL}/api/devices`);
       const data = await res.json();
-      if (data.success && Array.isArray(data.devices)) {
-        setDevices(data.devices);
+      if (data.success) {
+        if (Array.isArray(data.devices)) setDevices(data.devices);
+        if (Array.isArray(data.deviceDetails)) setDeviceDetails(data.deviceDetails);
+        if (Array.isArray(data.installedApps)) setInstalledApps(data.installedApps);
+
         if (data.devices.length > 0 && !selectedUdid) {
           setSelectedUdid(data.devices[0]);
         }
@@ -96,15 +137,14 @@ export const DominosAdminDashboard: React.FC = () => {
     logsEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [logs]);
 
-  // Handle Preset Changes
-  const handlePresetChange = (preset: string) => {
-    setAppPreset(preset);
-    if (preset === 'dominos_default') {
-      setAppPackage('com.Dominos');
+  // Handle App Selection
+  const handleAppChange = (pkg: string) => {
+    setAppPreset(pkg);
+    setAppPackage(pkg);
+    if (pkg === 'com.Dominos') {
       setAppActivity('com.Dominos.activity.alias.LauncherDefaultAlias');
-    } else if (preset === 'dominos_splash') {
-      setAppPackage('com.Dominos');
-      setAppActivity('com.Dominos.activity.SplashActivity');
+    } else {
+      setAppActivity('');
     }
   };
 
@@ -172,7 +212,7 @@ export const DominosAdminDashboard: React.FC = () => {
         <div style={styles.guideHeader} onClick={() => setShowGuide(!showGuide)}>
           <div style={styles.guideTitleGroup}>
             <span style={{ fontSize: '20px' }}>📱</span>
-            <strong>Device Developer Mode Prerequisites & Instructions</strong>
+            <strong>Device Connection Status & Wireless Debugging Prerequisites</strong>
           </div>
           <button style={styles.toggleBtn}>{showGuide ? 'Hide Guide ▲' : 'Show Instructions ▼'}</button>
         </div>
@@ -180,18 +220,18 @@ export const DominosAdminDashboard: React.FC = () => {
         {showGuide && (
           <div style={styles.guideBody}>
             <p style={{ margin: '0 0 10px 0', color: '#e2e8f0', fontSize: '14px' }}>
-              Before launching the test, make sure your Android phone is prepared as follows:
+              Ensure your phone is properly connected before starting:
             </p>
             <ol style={styles.guideList}>
               <li>
-                <strong>Enable Developer Options:</strong> Open phone <em>Settings ➔ About Phone ➔ Build Number</em> and tap <strong>7 times</strong> until you see <em>"You are now a developer!"</em>.
+                <strong>Wireless / USB Debugging:</strong> Keep Wireless Debugging toggled ON in <em>Settings ➔ Developer Options</em>.
               </li>
               <li>
-                <strong>Enable Wireless Debugging / USB Debugging:</strong> Go to <em>Settings ➔ System / Developer Options</em> and toggle ON <strong>Wireless Debugging</strong> (or USB Debugging).
+                <strong>Connect Command:</strong> If your IP address changes, run: <br />
+                <code style={styles.codeSnippet}>adb connect &lt;PHONE_IP&gt;:&lt;PORT&gt;</code> (e.g. <code>adb connect 192.168.29.77:45013</code>)
               </li>
               <li>
-                <strong>Pair Device / Copy Connection Port:</strong> On the Wireless Debugging screen, note down your <strong>IP Address & Port</strong> (e.g. <code>192.168.29.77:46721</code>). If not paired, run: <br />
-                <code style={styles.codeSnippet}>adb pair &lt;IP&gt;:&lt;PAIRING_PORT&gt; &lt;CODE&gt;</code> then <code style={styles.codeSnippet}>adb connect &lt;IP&gt;:&lt;CONNECT_PORT&gt;</code>
+                <strong>Automatic Device Selection:</strong> The system automatically selects active IP connections (e.g. <code>192.168.29.77:45013</code>) over raw mDNS string handles.
               </li>
             </ol>
           </div>
@@ -237,34 +277,60 @@ export const DominosAdminDashboard: React.FC = () => {
                 onChange={(e) => setSelectedUdid(e.target.value)}
               >
                 {devices.length === 0 && <option value="">No ADB devices detected (Connect via Wi-Fi/USB)</option>}
-                {devices.map((d) => (
+                {deviceDetails.map((d) => (
+                  <option key={d.udid} value={d.udid}>
+                    📲 {d.model ? `${d.model} (${d.udid})` : d.udid}
+                  </option>
+                ))}
+                {deviceDetails.length === 0 && devices.map((d) => (
                   <option key={d} value={d}>
                     📲 {d}
                   </option>
                 ))}
               </select>
             ) : (
-              <input
-                type="text"
-                style={styles.input}
-                placeholder="e.g. 192.168.29.77:46721"
-                value={customUdid}
-                onChange={(e) => setCustomUdid(e.target.value)}
-              />
+              <div>
+                <div style={{ display: 'flex', gap: '8px' }}>
+                  <input
+                    type="text"
+                    style={{ ...styles.input, flex: 1 }}
+                    placeholder="e.g. 192.168.29.77:45013"
+                    value={customUdid}
+                    onChange={(e) => setCustomUdid(e.target.value)}
+                  />
+                  <button
+                    type="button"
+                    style={styles.connectBtn(connectingAdb)}
+                    onClick={() => connectAdb(customUdid)}
+                    disabled={connectingAdb}
+                  >
+                    {connectingAdb ? '⚡ Connecting...' : '⚡ Connect ADB'}
+                  </button>
+                </div>
+                {connectStatusMsg && (
+                  <div style={{ fontSize: '12px', marginTop: '6px', color: connectStatusMsg.toLowerCase().includes('connected') ? '#4ade80' : '#38bdf8' }}>
+                    {connectStatusMsg}
+                  </div>
+                )}
+              </div>
             )}
           </div>
 
-          {/* App Package & Activity Presets */}
+          {/* Installed Application Selection */}
           <div style={styles.fieldGroup}>
-            <label style={styles.label}>App Package & Launcher Activity Preset</label>
+            <label style={styles.label}>Select Target Application</label>
             <select
               style={styles.input}
               value={appPreset}
-              onChange={(e) => handlePresetChange(e.target.value)}
+              onChange={(e) => handleAppChange(e.target.value)}
             >
-              <option value="dominos_default">Domino's India - LauncherDefaultAlias (Default)</option>
-              <option value="dominos_splash">Domino's India - SplashActivity</option>
-              <option value="custom">Custom App Package & Activity...</option>
+              <option value="com.Dominos">🍕 Domino's Pizza (com.Dominos)</option>
+              {installedApps.filter(a => a.package !== 'com.Dominos').map(app => (
+                <option key={app.package} value={app.package}>
+                  📱 {app.name} ({app.package})
+                </option>
+              ))}
+              <option value="custom">✍️ Custom App Package & Activity...</option>
             </select>
           </div>
 
@@ -312,8 +378,8 @@ export const DominosAdminDashboard: React.FC = () => {
               value={couponSource}
               onChange={(e) => setCouponSource(e.target.value)}
             >
-              <option value="cache">⚡ Local Cache (13 Coupons from coupons.json)</option>
-              <option value="scrape">🌐 Live Web Scraping (Scrape fresh coupons from GrabOn via Playwright)</option>
+              <option value="wethrift">🌐 wethrift.spec (Scrape live coupons using Playwright wethrift.spec)</option>
+              <option value="grabon">🌐 GrabOn Live Web Scrape</option>
               <option value="custom">✍️ Custom List (Enter manually below)</option>
             </select>
           </div>
@@ -534,6 +600,17 @@ const styles = {
     fontSize: '12px',
     fontWeight: 500,
   },
+  connectBtn: (disabled: boolean) => ({
+    padding: '8px 14px',
+    backgroundColor: disabled ? '#334155' : '#0284c7',
+    color: '#ffffff',
+    border: 'none',
+    borderRadius: '8px',
+    fontWeight: 600,
+    fontSize: '13px',
+    cursor: disabled ? 'not-allowed' : 'pointer',
+    whiteSpace: 'nowrap' as const,
+  }),
   startBtn: (disabled: boolean) => ({
     flex: 1,
     padding: '12px 20px',
